@@ -580,6 +580,11 @@ fn binary_op(op: &str) -> &'static str {
     }
 }
 
+// The relational tier is non-associative: its same-precedence children
+// keep parentheses on BOTH sides (mirror of formatter.rs and the ruby
+// expressions_formatter #651 minimal-paren contract).
+const RELATIONAL_PRECEDENCE: u8 = 4;
+
 fn precedence(op: &str) -> u8 {
     match op {
         "EXPONENTIATION" => 1,
@@ -592,22 +597,33 @@ fn precedence(op: &str) -> u8 {
 fn binary_expression(v: &Value, ptr: &str, map: &mut HashMap<String, Piece>) -> Piece {
     let op = str_field(v, "operator");
     let my_prec = precedence(op);
-    let mut paren = |key: &str| -> Option<Piece> {
+    let relational = my_prec == RELATIONAL_PRECEDENCE;
+    // The minimal-paren policy (#651): a same-precedence LEFT child
+    // renders bare (`(a+b)+c` == `a+b+c`); the RIGHT child keeps parens
+    // when same-or-looser; the relational tier keeps same-precedence
+    // parens on BOTH sides. Counting `+2` parens where the ruby tier
+    // renders none drifts every length by the paren pair.
+    let mut paren = |key: &str, strict_left: bool| -> Option<Piece> {
         let operand = child(v, key)?;
-        if class_of(operand) == "Expressions::BinaryExpression"
-            && precedence(str_field(operand, "operator")) >= my_prec
-        {
-            let inner = fmt(Some(v), key, ptr, map);
-            Some(Piece {
-                len: inner.len + 2,
-                nl: inner.nl,
-            })
-        } else {
-            Some(fmt(Some(v), key, ptr, map))
+        if class_of(operand) == "Expressions::BinaryExpression" {
+            let child = precedence(str_field(operand, "operator"));
+            let wraps = if strict_left {
+                child > my_prec || (relational && child == my_prec)
+            } else {
+                child >= my_prec || (relational && child == my_prec)
+            };
+            if wraps {
+                let inner = fmt(Some(v), key, ptr, map);
+                return Some(Piece {
+                    len: inner.len + 2,
+                    nl: inner.nl,
+                });
+            }
         }
+        Some(fmt(Some(v), key, ptr, map))
     };
-    let op1 = paren("operand1").unwrap_or_default();
-    let op2 = paren("operand2").unwrap_or_default();
+    let op1 = paren("operand1", true).unwrap_or_default();
+    let op2 = paren("operand2", false).unwrap_or_default();
     let op_piece = Piece::flat(binary_op(op).len() + 2);
     concat(&[op1, op_piece, op2])
 }
