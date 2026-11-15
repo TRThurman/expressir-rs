@@ -74,8 +74,11 @@ fn c_abi_resolve_fills_cross_schema_base_paths() {
     const TWO_SCHEMAS: &str = "SCHEMA base;\nENTITY base_entity;\nEND_ENTITY;\nEND_SCHEMA;\nSCHEMA user_schema;\nUSE FROM base;\nENTITY user_entity SUBTYPE OF (base_entity);\nEND_ENTITY;\nEND_SCHEMA;\n";
     let wire = take(abi::expr_parse_schema(feed(TWO_SCHEMAS).as_ptr()));
     let resolved = take(abi::expr_resolve(feed(&wire).as_ptr()));
+    // The parse_schema wire stamps the invocation path on the root, and
+    // the fills carry ruby's ExpFile#id-else-path segment — the
+    // from_file path form.
     assert!(
-        resolved.contains("\"base_path\":\".base.base_entity\""),
+        resolved.contains("\"base_path\":\"source.exp.base.base_entity\""),
         "resolved wire: {resolved}"
     );
 }

@@ -70,16 +70,7 @@ impl<'a> Ctx<'a> {
                     id.to_string()
                 };
                 let base = self.find(&ptr, &search);
-                // Ruby's path walk adds a part for EVERY HasId ancestor
-                // including nil ids — the from_exp model sits in a nil-id
-                // Repository, so every fill is ".schema.item" with a
-                // leading empty segment. node_path stops at the wire root
-                // and skips nil-id parts; restore the repository segment
-                // so the fills carry the ruby contract byte-for-byte.
-                let fill = base
-                    .and_then(|b| self.node_path(&b))
-                    .map(|p| format!(".{p}"));
-                fills.push((ptr, fill));
+                fills.push((ptr, base.and_then(|b| self.node_path(&b))));
             }
         }
         fills
@@ -620,9 +611,23 @@ impl<'a> Ctx<'a> {
                 _ => break,
             }
         }
-        if parts.is_empty() {
+        // Ruby's path walk adds a part for EVERY HasId ancestor,
+        // including nil ids (a nil part joins as the empty segment
+        // behind ruby's leading dot), and the root ExpFile's id getter
+        // falls back to its path (ExpFile#id = the file path on
+        // from_file models). The parent walk above stops before the
+        // wire root (its parent ptr is the empty string), so the root
+        // segment is added here explicitly: id, else path, else the
+        // empty string.
+        let root = self.node("");
+        let root_seg = id_of(root)
+            .map(|s| s.to_string())
+            .or_else(|| root.get("path").and_then(Value::as_str).map(String::from))
+            .unwrap_or_default();
+        if parts.is_empty() && root_seg.is_empty() {
             return None;
         }
+        parts.push(root_seg);
         parts.reverse();
         Some(parts.join("."))
     }
@@ -990,5 +995,53 @@ impl<'a> Ctx<'a> {
             }
         }
         false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn node_path_uses_the_root_path_segment() {
+        let wire = json!({
+            "_class": "Expressir::Model::ExpFile",
+            "path": "spec/syntax/single.exp",
+            "schemas": [{
+                "_class": "Expressir::Model::Declarations::Schema",
+                "id": "single_schema",
+                "entities": [
+                    {"_class": "Expressir::Model::Declarations::Entity", "id": "empty_entity"},
+                    {"_class": "Expressir::Model::Declarations::Entity", "id": "subtype_empty_entity",
+                     "subtype_of": [{"_class": "Expressir::Model::References::SimpleReference",
+                                     "id": "empty_entity"}]}
+                ]
+            }]
+        });
+        let ctx = Ctx::new(&wire);
+        assert_eq!(
+            ctx.node_path("/schemas/0/entities/0").as_deref(),
+            Some("spec/syntax/single.exp.single_schema.empty_entity")
+        );
+    }
+
+    #[test]
+    fn node_path_yields_the_leading_dot_without_a_root_path() {
+        let wire = json!({
+            "_class": "Expressir::Model::ExpFile",
+            "schemas": [{
+                "_class": "Expressir::Model::Declarations::Schema",
+                "id": "single_schema",
+                "entities": [
+                    {"_class": "Expressir::Model::Declarations::Entity", "id": "empty_entity"}
+                ]
+            }]
+        });
+        let ctx = Ctx::new(&wire);
+        assert_eq!(
+            ctx.node_path("/schemas/0/entities/0").as_deref(),
+            Some(".single_schema.empty_entity")
+        );
     }
 }
