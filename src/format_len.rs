@@ -163,9 +163,13 @@ fn grouped_decls(
         }
         let run = &items[i..run_end];
         let combinable = run.len() > 1
-            && run.iter().all(|item| arr(item.0, "remark_items").is_empty())
+            && run
+                .iter()
+                .all(|item| arr(item.0, "remark_items").is_empty())
             && !(kind == GroupKind::Attribute
-                && run.iter().any(|item| item.0.get("supertype_attribute").is_some()));
+                && run
+                    .iter()
+                    .any(|item| item.0.get("supertype_attribute").is_some()));
         if combinable {
             for item in run {
                 class_len(item.0, &item.1, map);
