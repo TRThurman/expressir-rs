@@ -377,10 +377,16 @@ fn function_call_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     } else {
         hash_get(arena, n, "functionRef").and_then(|fr| simple_ref(arena, &fr, REF_ID_KEYS))
     }?;
-    let params = actual_parameters_json(arena, n);
-    if params.is_empty() {
+    // No actualParameterList capture = no paren list in the source (a
+    // plain reference). A capture present — even with an empty list —
+    // is an explicit call: `f()` is a FunctionCall (#556), matching the
+    // ruby builder's nil-vs-[] distinction.
+    let has_param_list =
+        hash_get(arena, n, "actualParameterList").is_some_and(|v| !matches!(v, AstNode::Nil));
+    if !has_param_list {
         return Some(func);
     }
+    let params = actual_parameters_json(arena, n);
     let mut m = node(CLASS_FUNCTION_CALL);
     m.insert("function".into(), func);
     m.insert("parameters".into(), Value::Array(params));
