@@ -70,7 +70,16 @@ impl<'a> Ctx<'a> {
                     id.to_string()
                 };
                 let base = self.find(&ptr, &search);
-                fills.push((ptr, base.and_then(|b| self.node_path(&b))));
+                // Ruby's path walk adds a part for EVERY HasId ancestor
+                // including nil ids — the from_exp model sits in a nil-id
+                // Repository, so every fill is ".schema.item" with a
+                // leading empty segment. node_path stops at the wire root
+                // and skips nil-id parts; restore the repository segment
+                // so the fills carry the ruby contract byte-for-byte.
+                let fill = base
+                    .and_then(|b| self.node_path(&b))
+                    .map(|p| format!(".{p}"));
+                fills.push((ptr, fill));
             }
         }
         fills
@@ -415,12 +424,17 @@ impl<'a> Ctx<'a> {
                     push(&mut out, attr);
                 }
             }
-            "Alias"
-            | "Repeat"
-            | "QueryExpression"
-            | "SubtypeConstraint"
-            | "InformalPropositionRule"
-            | "InterfacedItem" => {
+            // The bound-variable scopes register THEMSELVES in ruby
+            // (children = [self, *remark_items]): a lookup of the bound
+            // id resolves to the scope node, whose path is nil, so the
+            // reference stays unfilled — no leak past the shadow.
+            "Alias" | "Repeat" | "QueryExpression" => {
+                if let Some(id) = id_of(scope) {
+                    out.insert(safe_downcase(id), base.clone());
+                }
+                push(&mut out, "remark_items");
+            }
+            "SubtypeConstraint" | "InformalPropositionRule" | "InterfacedItem" => {
                 push(&mut out, "remark_items");
             }
             _ => {}

@@ -45,6 +45,17 @@ fn attach_format_check_round_trip() {
 }
 
 #[test]
+fn resolve_fills_cross_schema_base_paths() {
+    const TWO_SCHEMAS: &str = "SCHEMA base;\nENTITY base_entity;\nEND_ENTITY;\nEND_SCHEMA;\nSCHEMA user_schema;\nUSE FROM base;\nENTITY user_entity SUBTYPE OF (base_entity);\nEND_ENTITY;\nEND_SCHEMA;\n";
+    let wire_json = wasm::wire_schema_json(TWO_SCHEMAS.to_string()).expect("wire parse");
+    let resolved = wasm::resolve_json(wire_json).expect("resolve");
+    assert!(
+        resolved.contains("\"base_path\":\".base.base_entity\""),
+        "resolved: {resolved}"
+    );
+}
+
+#[test]
 fn population_parse_and_validate() {
     let json = wasm::parse_population_json(POPULATION.to_string()).expect("population");
     assert!(json.contains("E"), "population: {json}");
