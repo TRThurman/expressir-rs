@@ -269,11 +269,15 @@ impl<'a> Ctx<'a> {
         let mut out: HashMap<String, String> = HashMap::new();
         // Ruby Schema#children: interfaced_items first, then
         // safe_children — later collections win id collisions.
-        let mut visited: HashSet<String> = HashSet::new();
+        // expressir#667: the visited set is PER INTERFACE — each
+        // top-level interface expands independently (visibilities
+        // union across interfaces per ISO 10303-11), and the fresh set
+        // bounds the transitive-USE recursion inside each expansion.
         let iface_count = arr(self.schema(schema), "interfaces").len();
         let base = self.schema_ptr(schema).to_string();
         for k in 0..iface_count {
             let iface_ptr = format!("{base}/interfaces/{k}");
+            let mut visited: HashSet<String> = HashSet::new();
             for (name, base_ptr) in self.interface_expansion(&iface_ptr, &mut visited) {
                 out.insert(name, base_ptr);
             }
@@ -890,11 +894,12 @@ impl<'a> Ctx<'a> {
             }
         }
         // Interface-expanded names whose base is a Type or Entity.
+        // expressir#667: per-interface visited, like the children map.
         let base = self.schema_ptr(schema).to_string();
         let iface_count = arr(node, "interfaces").len();
-        let mut visited: HashSet<String> = HashSet::new();
         for k in 0..iface_count {
             let iface_ptr = format!("{base}/interfaces/{k}");
+            let mut visited: HashSet<String> = HashSet::new();
             for (visible, base_ptr) in self.interface_expansion(&iface_ptr, &mut visited) {
                 if visible == key {
                     let tail = class_tail(self.node(&base_ptr));
