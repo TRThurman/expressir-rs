@@ -129,6 +129,86 @@ fn fmt_each(v: &Value, key: &str, ptr: &str, map: &mut HashMap<String, Piece>) -
         .collect()
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum GroupKind {
+    Attribute,
+    Parameter,
+    Variable,
+}
+
+fn decl_group_of(v: &Value) -> Option<u64> {
+    v.get("declaration_group").and_then(Value::as_u64)
+}
+
+/// rs#70 — mirror the ruby format_grouped_declarations arithmetic (#655):
+/// adjacent same-declaration_group siblings render as ONE declaration
+/// (sibling ids joined ", " over the lead's head fields). Members are
+/// still class_len'd per node so the remark attacher sees each of them;
+/// a run is combinable only when it has >1 members, none carries
+/// remarks, and (for attributes) none is a renamed supertype attribute.
+fn grouped_decls(
+    items: Vec<(&Value, String)>,
+    map: &mut HashMap<String, Piece>,
+    kind: GroupKind,
+) -> Vec<Piece> {
+    let mut out: Vec<Piece> = Vec::new();
+    let mut i = 0;
+    while i < items.len() {
+        let node = items[i].0;
+        let mut run_end = i + 1;
+        if let Some(g) = decl_group_of(node) {
+            while run_end < items.len() && decl_group_of(items[run_end].0) == Some(g) {
+                run_end += 1;
+            }
+        }
+        let run = &items[i..run_end];
+        let combinable = run.len() > 1
+            && run.iter().all(|item| arr(item.0, "remark_items").is_empty())
+            && !(kind == GroupKind::Attribute
+                && run.iter().any(|item| item.0.get("supertype_attribute").is_some()));
+        if combinable {
+            for item in run {
+                class_len(item.0, &item.1, map);
+            }
+            let lead = run[0].0;
+            let lead_ptr = run[0].1.as_str();
+            let ids: usize = run
+                .iter()
+                .map(|item| str_field(item.0, "id").chars().count())
+                .sum::<usize>()
+                + 2 * (run.len() - 1);
+            let mut parts = vec![
+                Piece::flat(if kind == GroupKind::Parameter && is_truthy(lead, "var") {
+                    4
+                } else {
+                    0
+                }),
+                Piece::flat(ids),
+                Piece::flat(3),
+                fmt(Some(lead), "type", lead_ptr, map),
+            ];
+            if kind == GroupKind::Attribute {
+                if is_truthy(lead, "optional") {
+                    parts.insert(parts.len() - 1, Piece::flat(9));
+                }
+                parts.push(Piece::flat(1));
+            } else if kind == GroupKind::Variable {
+                if is_truthy(lead, "expression") {
+                    parts.push(Piece::flat(4));
+                    parts.push(fmt(Some(lead), "expression", lead_ptr, map));
+                }
+                parts.push(Piece::flat(1));
+            }
+            out.push(concat(&parts));
+            i = run_end;
+        } else {
+            out.push(class_len(node, &items[i].1, map));
+            i += 1;
+        }
+    }
+    out
+}
+
 fn dispatched_len(parts: &[Piece]) -> Piece {
     concat(parts)
 }
@@ -841,17 +921,17 @@ fn entity(v: &Value, ptr: &str, map: &mut HashMap<String, Piece>) -> Piece {
     for (i, a) in arr(v, "inverse_attributes").into_iter().enumerate() {
         attrs.push((a, format!("{ptr}/inverse_attributes/{i}")));
     }
-    let mut explicit: Vec<Piece> = Vec::new();
+    let mut explicit_items: Vec<(&Value, String)> = Vec::new();
     let mut derived: Vec<Piece> = Vec::new();
     let mut inverse: Vec<Piece> = Vec::new();
     for (a, aptr) in &attrs {
-        let p = class_len(a, aptr, map);
         match str_field(a, "kind") {
-            "DERIVED" => derived.push(p),
-            "INVERSE" => inverse.push(p),
-            _ => explicit.push(p),
+            "DERIVED" => derived.push(class_len(a, aptr, map)),
+            "INVERSE" => inverse.push(class_len(a, aptr, map)),
+            _ => explicit_items.push((a, aptr.clone())),
         }
     }
+    let explicit = grouped_decls(explicit_items, map, GroupKind::Attribute);
 
     let mut parts = vec![header];
     if !explicit.is_empty() {
@@ -898,7 +978,12 @@ fn scope_blocks(v: &Value, ptr: &str, map: &mut HashMap<String, Piece>) -> Vec<P
         ])));
     }
     if positive(v, "variables") {
-        let vs = fmt_each(v, "variables", ptr, map);
+        let items: Vec<(&Value, String)> = arr(v, "variables")
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| (x, format!("{ptr}/variables/{i}")))
+            .collect();
+        let vs = grouped_decls(items, map, GroupKind::Variable);
         parts.push(indent(join_nl(&[
             Piece::flat(5),
             indent(join_nl(&vs)),
@@ -919,7 +1004,12 @@ fn function(
     let mut header_parts = vec![Piece::flat(kw.len() + 1 + id.len())];
     if is_truthy(v, "parameters") {
         let param_indent = " ".repeat(kw.len() + 1 + id.len() + 1);
-        let params = fmt_each(v, "parameters", ptr, map);
+        let items: Vec<(&Value, String)> = arr(v, "parameters")
+            .into_iter()
+            .enumerate()
+            .map(|(i, x)| (x, format!("{ptr}/parameters/{i}")))
+            .collect();
+        let params = grouped_decls(items, map, GroupKind::Parameter);
         let joined = join_sep(&params, &format!(";\n{param_indent}"));
         header_parts.push(concat(&[Piece::flat(1), joined, Piece::flat(1)]));
     }

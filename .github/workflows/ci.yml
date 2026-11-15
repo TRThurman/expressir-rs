@@ -118,10 +118,11 @@ jobs:
         with:
           ruby-version: "3.4"
       # CI-only overlay: pin the parity bundle to the known-good
-      # lutaml-model. A fresh resolve lands 0.8.175, whose hydration
-      # reshapes sparse (rust-emitted) wires and drifts 19 fixtures —
-      # investigated upstream in lutaml/lutaml-model#1160. Drop this
-      # pin when that lands or the adaptation is made.
+      # lutaml-model. A fresh resolve lands 0.8.175, which drifts 19
+      # fixtures the same way 0.8.161 does (baseline-proven pre-existing
+      # wire drift — the hydration hypothesis was falsified and
+      # lutaml/lutaml-model#1160 closed). Drop this pin when the wire
+      # drift itself is aligned.
       - run: |
           cd expressir
           echo 'gem "lutaml-model", "0.8.161"' >> Gemfile
@@ -129,10 +130,5 @@ jobs:
           cd -
       - run: |
           RUST_MIN_STACK=67108864 EXPRESSIR_DIR=$PWD/expressir cargo test --release --test remark_attachment_parity
-      # The formatted-length mirror has a known multi-class alignment debt
-      # on function bodies (+len/+nl) — the #637 formatter-family campaign
-      # owns it; its corpus run is the campaign acceptance, so it cannot
-      # gate merges yet.
       - run: |
           RUST_MIN_STACK=67108864 EXPRESSIR_DIR=$PWD/expressir cargo test --release --test formatted_len_parity
-        continue-on-error: true
