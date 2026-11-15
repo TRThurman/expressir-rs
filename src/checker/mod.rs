@@ -308,6 +308,22 @@ pub fn check(root: &mut Value, dialect: Option<&str>) -> Vec<CheckerNote> {
     ctx.notes
 }
 
+/// The #635 model-wire resolution pass: fill `base_path` on every
+/// reference node exactly like the ruby ResolveReferencesModelVisitor
+/// (`ModelElement#find` over the scope chain, interface closure,
+/// InterfacedItem deref). The same resolution core the checker's Phase 1
+/// uses, exposed standalone for the parse surfaces. Returns the number
+/// of references that resolved to a declaration path.
+pub fn resolve_references(root: &mut Value) -> usize {
+    let fills = {
+        let ctx = Ctx::new(root);
+        ctx.collect_reference_fills()
+    };
+    let resolved = fills.iter().filter(|(_, p)| p.is_some()).count();
+    apply_fills(root, fills);
+    resolved
+}
+
 fn apply_fills(root: &mut Value, fills: Vec<(String, Option<String>)>) {
     for (ptr, path) in fills {
         if let Some(node) = root.pointer_mut(&ptr) {

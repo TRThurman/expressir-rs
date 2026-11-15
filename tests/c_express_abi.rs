@@ -70,6 +70,17 @@ fn c_abi_round_trips_the_core_surfaces() {
 }
 
 #[test]
+fn c_abi_resolve_fills_cross_schema_base_paths() {
+    const TWO_SCHEMAS: &str = "SCHEMA base;\nENTITY base_entity;\nEND_ENTITY;\nEND_SCHEMA;\nSCHEMA user_schema;\nUSE FROM base;\nENTITY user_entity SUBTYPE OF (base_entity);\nEND_ENTITY;\nEND_SCHEMA;\n";
+    let wire = take(abi::expr_parse_schema(feed(TWO_SCHEMAS).as_ptr()));
+    let resolved = take(abi::expr_resolve(feed(&wire).as_ptr()));
+    assert!(
+        resolved.contains("\"base_path\":\".base.base_entity\""),
+        "resolved wire: {resolved}"
+    );
+}
+
+#[test]
 fn c_abi_population_surfaces() {
     let population = take(abi::expr_parse_population(feed(POPULATION).as_ptr()));
     assert!(population.contains("E"), "population: {population}");

@@ -146,6 +146,26 @@ pub extern "C" fn expr_check(wire_json: *const c_char, dialect: *const c_char) -
     }
 }
 
+/// Resolves a wire's references in place (#635): fills `base_path` on
+/// every reference node exactly like the ruby
+/// ResolveReferencesModelVisitor. Returns the resolved wire.
+#[no_mangle]
+pub extern "C" fn expr_resolve(wire_json: *const c_char) -> *mut c_char {
+    let Some(wire_json) = input(wire_json) else {
+        set_error("wire_json is NULL");
+        return std::ptr::null_mut();
+    };
+    let mut wire: serde_json::Value = match serde_json::from_str(&wire_json) {
+        Ok(value) => value,
+        Err(err) => {
+            set_error(&format!("wire json: {err}"));
+            return std::ptr::null_mut();
+        }
+    };
+    crate::checker::resolve_references(&mut wire);
+    out(wire.to_string())
+}
+
 /// Parses an ISO-10303-21 population into its structural inventory JSON.
 #[no_mangle]
 pub extern "C" fn expr_parse_population(source: *const c_char) -> *mut c_char {

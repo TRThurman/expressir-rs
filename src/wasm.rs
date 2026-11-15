@@ -162,6 +162,15 @@ pub fn check_json(wire_json: String, dialect: Option<String>) -> Result<String, 
     serde_json::to_string(&findings).map_err(|e| format!("serialize: {e}"))
 }
 
+/// Resolves a wire's references in place (#635); returns the resolved
+/// wire JSON.
+pub fn resolve_json(wire_json: String) -> Result<String, String> {
+    let mut wire: serde_json::Value =
+        serde_json::from_str(&wire_json).map_err(|e| format!("wire json: {e}"))?;
+    crate::checker::resolve_references(&mut wire);
+    serde_json::to_string(&wire).map_err(|e| format!("serialize: {e}"))
+}
+
 #[cfg(target_arch = "wasm32")]
 mod bindings {
     use wasm_bindgen::prelude::wasm_bindgen;
@@ -203,5 +212,10 @@ mod bindings {
     #[wasm_bindgen]
     pub fn check(wire_json: String, dialect: Option<String>) -> Result<String, String> {
         super::check_json(wire_json, dialect)
+    }
+
+    #[wasm_bindgen]
+    pub fn resolve(wire_json: String) -> Result<String, String> {
+        super::resolve_json(wire_json)
     }
 }
