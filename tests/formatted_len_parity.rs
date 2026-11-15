@@ -83,26 +83,6 @@ fn corpus_files(expressir_dir: &Path) -> Vec<PathBuf> {
     collect_exp_files(expressir_dir, &mut files);
     files.sort();
     files.dedup();
-    // The eeng-oracle concatenated schema exercises function-body shapes
-    // the mirror does not model yet (40 Function nodes, +len and +nl
-    // divergences — the function-body render differs structurally, not
-    // just paren pairs). The alignment is the #637 formatter-family
-    // campaign; the gate stays on the rest of the corpus until it lands.
-    let excluded: Vec<PathBuf> = files
-        .iter()
-        .filter(|p| {
-            p.file_name()
-                .is_some_and(|n| n == "description-assignment-mim-concatenated.exp")
-        })
-        .cloned()
-        .collect();
-    if !excluded.is_empty() {
-        eprintln!(
-            "excluded {} file(s) from the formatted-length corpus (the #637 mirror-alignment campaign)",
-            excluded.len()
-        );
-    }
-    files.retain(|p| !excluded.contains(p));
     files
 }
 
