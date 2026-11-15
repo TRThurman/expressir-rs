@@ -50,7 +50,7 @@ fn resolve_fills_cross_schema_base_paths() {
     let wire_json = wasm::wire_schema_json(TWO_SCHEMAS.to_string()).expect("wire parse");
     let resolved = wasm::resolve_json(wire_json).expect("resolve");
     assert!(
-        resolved.contains("\"base_path\":\".base.base_entity\""),
+        resolved.contains("\"base_path\":\"source.exp.base.base_entity\""),
         "resolved: {resolved}"
     );
 }

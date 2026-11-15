@@ -243,6 +243,13 @@ fn resolved_wires_match_the_ruby_resolve_over_the_corpus() {
         let Ok(mut wire) = tree.to_model_json("parity.exp") else {
             continue;
         };
+        // The stamped path is a parse-invocation artifact (the ruby
+        // from_exp lane has none) — remove it BEFORE the resolve so the
+        // fills carry the ruby repository-dot form, not a fake file
+        // segment.
+        if let Some(obj) = wire.as_object_mut() {
+            obj.remove("path");
+        }
         expressir_rs::checker::resolve_references(&mut wire);
         sources.insert(key.clone(), source);
         parsed.push((key, wire));
