@@ -1,4 +1,4 @@
-use serde_json::{json, Value};
+use serde_json::json;
 
 #[test]
 fn resolve_uses_the_root_path_segment() {
