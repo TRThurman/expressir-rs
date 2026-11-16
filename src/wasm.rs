@@ -162,6 +162,12 @@ pub fn check_json(wire_json: String, dialect: Option<String>) -> Result<String, 
     serde_json::to_string(&findings).map_err(|e| format!("serialize: {e}"))
 }
 
+/// Scans an EXPRESS source for non-ASCII violations (#643).
+pub fn scan_ascii_json(source: String, check_remarks: bool) -> Result<String, String> {
+    let violations = crate::validate_ascii::scan_source(&source, check_remarks);
+    serde_json::to_string(&violations).map_err(|e| format!("serialize: {e}"))
+}
+
 /// Parses an ISO-10303-21 exchange structure and re-emits it (#642).
 pub fn round_trip_population_json(source: String) -> Result<String, String> {
     crate::population::round_trip_population(&source)
@@ -227,5 +233,10 @@ mod bindings {
     #[wasm_bindgen]
     pub fn round_trip_population(source: String) -> Result<String, String> {
         super::round_trip_population_json(source)
+    }
+
+    #[wasm_bindgen]
+    pub fn scan_ascii(source: String, check_remarks: bool) -> Result<String, String> {
+        super::scan_ascii_json(source, check_remarks)
     }
 }

@@ -20,6 +20,7 @@ pub mod model;
 pub mod model_json;
 pub mod population;
 pub mod remark;
+pub mod validate_ascii;
 pub mod walk;
 pub mod wasm;
 
