@@ -12,6 +12,7 @@ pub mod attach;
 pub mod batch;
 pub mod checker;
 pub mod compiled_set;
+pub mod coverage;
 pub mod extract;
 pub mod ffi;
 pub mod format_len;
