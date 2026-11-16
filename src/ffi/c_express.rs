@@ -220,6 +220,25 @@ pub extern "C" fn expr_validate_population(
     }
 }
 
+/// Scans an EXPRESS source for non-ASCII violations (#643); returns
+/// the violation JSON array (run, line, column, char details and
+/// replacement suggestions).
+#[no_mangle]
+pub extern "C" fn expr_scan_ascii(source: *const c_char, check_remarks: i32) -> *mut c_char {
+    let Some(source) = input(source) else {
+        set_error("source is NULL");
+        return std::ptr::null_mut();
+    };
+    let violations = crate::validate_ascii::scan_source(&source, check_remarks != 0);
+    match serde_json::to_string(&violations) {
+        Ok(json) => out(json),
+        Err(err) => {
+            set_error(&format!("serialize: {err}"));
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Frees a string returned by any `expr_*` function.
 ///
 /// # Safety
