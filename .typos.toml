@@ -1,0 +1,3 @@
+# The AsciiMath token names are domain vocabulary, not English prose.
+[default.extend-words]
+oint = "oint"
