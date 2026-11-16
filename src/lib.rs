@@ -19,6 +19,7 @@ pub mod formatter;
 pub mod model;
 pub mod model_json;
 pub mod p21_typing;
+pub mod p21_validator;
 pub mod population;
 pub mod remark;
 pub mod validate_ascii;
