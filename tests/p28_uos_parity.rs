@@ -13,6 +13,10 @@ use serde_json::{json, Value};
 
 const RUBY_HARNESS: &str = r##"
 require "json"
+# Force the pure-ruby lane: with the extension present the ruby emit
+# delegates back to this same Rust writer and the gate would compare
+# the engine to itself.
+ENV["EXPRESSIR_DISABLE_NATIVE"] = "1"
 root = ARGV[0]
 $LOAD_PATH.unshift(File.join(root, "lib"))
 require "expressir"
@@ -61,6 +65,12 @@ const AGGREGATE_SCHEMA: &str = "SCHEMA aggregates;\n  ENTITY curve_set;\n    poi
 
 const AGGREGATE_POPULATION: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('a.pop','2026-11-16T00:00:00',(''),(''),'','','');\nFILE_SCHEMA(('AGGREGATES'));\nENDSEC;\nDATA;\n#1=POINT(1.5,2.5);\n#2=POINT(0.0,1.0);\n#3=CURVE_SET((#1,#2),('a','b'),(1.0,2.0,3.0));\n#4=CURVE_SET($,$,$);\nENDSEC;\nEND-ISO-10303-21;\n";
 
+/// Enumerations: the logical faces re-encode (9.5.2/9.5.4) while genuine
+/// items keep their declared text (9.6.1).
+const ENUM_SCHEMA: &str = "SCHEMA colours;\n  ENTITY swatch;\n    hue : colour_kind;\n    state : logical_state;\n  END_ENTITY;\n  TYPE colour_kind = ENUMERATION OF (red, green);\n  END_TYPE;\n  TYPE logical_state = ENUMERATION OF (yes, no, maybe);\n  END_TYPE;\nEND_SCHEMA;\n";
+
+const ENUM_POPULATION: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('e.pop','2026-11-16T00:00:00',(''),(''),'','','');\nFILE_SCHEMA(('COLOURS'));\nENDSEC;\nDATA;\n#1=SWATCH(.T.,.green.);\n#2=SWATCH(.UNKNOWN.,.red.);\nENDSEC;\nEND-ISO-10303-21;\n";
+
 /// A complex entity instance and a typed parameter. The aggregate keeps to
 /// simple members: the ruby aggregate_element calls `.keyword` on complex
 /// members and crashes (a latent ruby-lane bug), so the parity surface pins
@@ -83,6 +93,13 @@ fn pairs() -> serde_json::Map<String, Value> {
         json!({
             "schema": AGGREGATE_SCHEMA,
             "population": AGGREGATE_POPULATION,
+        }),
+    );
+    pairs.insert(
+        "enumerations".to_string(),
+        json!({
+            "schema": ENUM_SCHEMA,
+            "population": ENUM_POPULATION,
         }),
     );
     pairs.insert(
