@@ -239,6 +239,11 @@ pub fn uos_xml_json(
     crate::p28::uos_xml_json(&population_json, &schema_json, &options_json)
 }
 
+/// Emits the XML Schema rendering of a schema wire (#641).
+pub fn xsd_xml_json(schema_json: String) -> Result<String, String> {
+    crate::xsd::xsd_xml_json(&schema_json)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod bindings {
     use wasm_bindgen::prelude::wasm_bindgen;
@@ -255,6 +260,11 @@ mod bindings {
         options_json: String,
     ) -> Result<String, String> {
         super::uos_xml_json(population_json, schema_json, options_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn xsd_xml(schema_json: String) -> Result<String, String> {
+        super::xsd_xml_json(schema_json)
     }
 
     #[wasm_bindgen]

@@ -93,3 +93,19 @@ fn coverage_surface_classifies_entities() {
     assert!(report.contains("\"e\""), "rows: {report}");
     assert!(report.contains("\"documented\""), "rows: {report}");
 }
+
+#[test]
+fn writer_surfaces_emit_xml() {
+    let wire = wasm::wire_schema_json(SCHEMA.to_string()).expect("wire parse");
+
+    let xsd = wasm::xsd_xml_json(wire.clone()).expect("xsd");
+    assert!(xsd.starts_with("<xs:schema"), "{xsd}");
+
+    let uos = wasm::uos_xml_json(
+        "{\"instances\":{}}".to_string(),
+        wire,
+        "{\"id\":\"uos01\",\"target_namespace\":\"urn:t\",\"prefix\":\"t\"}".to_string(),
+    )
+    .expect("uos");
+    assert!(uos.contains("<t:uos"), "{uos}");
+}

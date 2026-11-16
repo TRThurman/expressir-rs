@@ -120,7 +120,7 @@ mod tests {
             .node(Element::new("empty"));
         assert_eq!(
             doc.to_xml(),
-            "<iso_10303_28 xmlns=\"urn:common\">\n  <express id=\"s1\">SCHEMA x;</express>\n  <empty></empty>\n</iso_10303_28>"
+            "<iso_10303_28 xmlns=\"urn:common\">\n  <express id=\"s1\">SCHEMA x;</express>\n  <empty></empty>\n</iso_10303_28>\n"
         );
     }
 
@@ -131,12 +131,12 @@ mod tests {
             .node(Element::new("t").text(">"));
         assert_eq!(
             doc.to_xml(),
-            "<r a=\"q&quot;x &amp; y&lt;z&gt;\">\n  <t>&gt;</t>\n</r>"
+            "<r a=\"q&quot;x &amp; y&lt;z&gt;\">\n  <t>&gt;</t>\n</r>\n"
         );
     }
 
     #[test]
     fn text_only_root_stays_inline() {
-        assert_eq!(Element::new("a").text("b").to_xml(), "<a>b</a>");
+        assert_eq!(Element::new("a").text("b").to_xml(), "<a>b</a>\n");
     }
 }
