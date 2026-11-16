@@ -791,3 +791,90 @@ fn build_value(param: &serde_json::Value) -> Result<P21Value, String> {
     }
     Err(format!("unrecognized parameter capture: {param}"))
 }
+
+// ---- the instance-level diff (#642 PR-2) ----
+
+/// The instance-level comparison of two populations (the ruby
+/// `P21::Diff`): ids added/removed, and shared ids whose record
+/// keyword-or-parameter digest changed. Ids sort numerically.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PopulationDiff {
+    pub added: Vec<u64>,
+    pub removed: Vec<u64>,
+    pub changed: Vec<u64>,
+}
+
+pub fn diff_populations(base: &FullPopulation, revised: &FullPopulation) -> PopulationDiff {
+    fn find<'a>(population: &'a FullPopulation, id: u64) -> Option<&'a Instance> {
+        population
+            .instances
+            .iter()
+            .find(|(key, _)| *key == id)
+            .map(|(_, instance)| instance)
+    }
+    let mut added: Vec<u64> = revised
+        .instances
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| find(base, *id).is_none())
+        .collect();
+    let mut removed: Vec<u64> = base
+        .instances
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| find(revised, *id).is_none())
+        .collect();
+    let mut changed: Vec<u64> = base
+        .instances
+        .iter()
+        .map(|(id, _)| *id)
+        .filter(|id| match (find(base, *id), find(revised, *id)) {
+            (Some(b), Some(r)) => b != r,
+            _ => false,
+        })
+        .collect();
+    added.sort_unstable();
+    removed.sort_unstable();
+    changed.sort_unstable();
+    PopulationDiff {
+        added,
+        removed,
+        changed,
+    }
+}
+
+#[cfg(test)]
+mod diff_tests {
+    use super::*;
+
+    fn rec(keyword: &str, params: Vec<P21Value>) -> Instance {
+        Instance::Simple(Record {
+            keyword: keyword.to_string(),
+            params,
+        })
+    }
+
+    #[test]
+    fn diffs_added_removed_changed() {
+        let base = FullPopulation {
+            instances: vec![
+                (1, rec("A", vec![])),
+                (2, rec("B", vec![P21Value::Number("1".into())])),
+                (3, rec("C", vec![])),
+            ],
+            ..Default::default()
+        };
+        let revised = FullPopulation {
+            instances: vec![
+                (2, rec("B", vec![P21Value::Number("2".into())])),
+                (3, rec("C", vec![])),
+                (4, rec("D", vec![])),
+            ],
+            ..Default::default()
+        };
+        let diff = diff_populations(&base, &revised);
+        assert_eq!(diff.added, vec![4]);
+        assert_eq!(diff.removed, vec![1]);
+        assert_eq!(diff.changed, vec![2]);
+    }
+}
