@@ -223,9 +223,39 @@ pub fn resolve_json(wire_json: String) -> Result<String, String> {
     serde_json::to_string(&wire).map_err(|e| format!("serialize: {e}"))
 }
 
+/// Computes documentation coverage over an attached wire (#644);
+/// `skip_types_json` is a JSON array of skip expressions.
+pub fn coverage_json(wire_json: String, skip_types_json: String) -> Result<String, String> {
+    crate::coverage::coverage_model_json(&wire_json, &skip_types_json)
+}
+
+/// Emits the clause 9 uos document for a population + schema wire
+/// pair (#640); options carry id/schema_ref/target_namespace/prefix.
+pub fn uos_xml_json(
+    population_json: String,
+    schema_json: String,
+    options_json: String,
+) -> Result<String, String> {
+    crate::p28::uos_xml_json(&population_json, &schema_json, &options_json)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod bindings {
     use wasm_bindgen::prelude::wasm_bindgen;
+
+    #[wasm_bindgen]
+    pub fn coverage(wire_json: String, skip_types_json: String) -> Result<String, String> {
+        super::coverage_json(wire_json, skip_types_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn uos_xml(
+        population_json: String,
+        schema_json: String,
+        options_json: String,
+    ) -> Result<String, String> {
+        super::uos_xml_json(population_json, schema_json, options_json)
+    }
 
     #[wasm_bindgen]
     pub fn parse_population(source: String) -> Result<String, String> {

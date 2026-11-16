@@ -80,3 +80,16 @@ fn p21_tooling_surfaces() {
     let diff = wasm::diff_population_json(src.clone(), src).expect("diff");
     assert!(diff.contains("\"added\":[]"), "{diff}");
 }
+
+#[test]
+fn coverage_surface_classifies_entities() {
+    let attached = wasm::attach_remarks_json(
+        wasm::wire_schema_json(SCHEMA.to_string()).expect("wire parse"),
+        SCHEMA.to_string(),
+        false,
+    )
+    .expect("attach");
+    let report = wasm::coverage_json(attached, "[]".to_string()).expect("coverage");
+    assert!(report.contains("\"e\""), "rows: {report}");
+    assert!(report.contains("\"documented\""), "rows: {report}");
+}
