@@ -56,6 +56,13 @@ fn resolve_fills_cross_schema_base_paths() {
 }
 
 #[test]
+fn round_trip_population_emits_canonical_text() {
+    let src = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('DEMO'));\nENDSEC;\nDATA;\n#1=E('v');\nENDSEC;\nEND-ISO-10303-21;\n";
+    let text = wasm::round_trip_population_json(src.to_string()).expect("round trip");
+    assert!(text.contains("#1=E('v');"), "{text}");
+}
+
+#[test]
 fn population_parse_and_validate() {
     let json = wasm::parse_population_json(POPULATION.to_string()).expect("population");
     assert!(json.contains("E"), "population: {json}");

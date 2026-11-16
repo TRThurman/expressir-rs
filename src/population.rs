@@ -347,3 +347,447 @@ mod tests {
         assert!(parse_population(truncated).is_err());
     }
 }
+
+// ---- the full population model (#642 PR-1): parse → write round trip ----
+
+/// A P21 parameter value, mirroring the ruby P21 value union.
+#[derive(Debug, Clone, PartialEq)]
+pub enum P21Value {
+    Unset,        // $
+    Derived,      // *
+    Bool(bool),   // .T. / .F.
+    Enum(String), // the name without the dots
+    Binary(String),
+    Str(String),
+    /// A reference, emitted `#12`.
+    Ref(u64),
+    /// A number kept as its SOURCE text so re-emission is verbatim.
+    Number(String),
+    /// A constant/external reference emitted verbatim (anchors and
+    /// attribute references).
+    Constant(String),
+    Typed(Typed),
+    List(Vec<P21Value>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Typed {
+    pub keyword: String,
+    pub params: Vec<P21Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Record {
+    pub keyword: String,
+    pub params: Vec<P21Value>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum Instance {
+    Simple(Record),
+    Complex(Vec<Record>),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Section {
+    pub name: Option<String>,
+    pub contexts: Vec<String>,
+    /// The instance ids in source order.
+    pub instance_ids: Vec<u64>,
+}
+
+/// The full exchange structure: header entities in insertion order,
+/// instances in source order, named data sections, anchors and
+/// references.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct FullPopulation {
+    pub header: Vec<(String, Vec<P21Value>)>,
+    pub instances: Vec<(u64, Instance)>,
+    pub sections: Vec<Section>,
+    pub anchors: Vec<(String, P21Value)>,
+    pub references: Vec<(u64, String)>,
+}
+
+/// Parses an exchange structure into the FULL population (typed
+/// values, complex records, named sections) through the PARG artifact.
+pub fn parse_full_population(input: &str) -> Result<FullPopulation, String> {
+    let artifact = artifact()?;
+    let tree = artifact
+        .parse_shape("exchange_structure", input)
+        .map_err(|err| format!("p21 parse: {err}"))?;
+    full_population_from_tree(&tree)
+}
+
+/// Serializes a full population back to ISO 10303-21 text, mirroring
+/// the ruby `P21::Writer` determinism: header entities in insertion
+/// order, data instances in source order, anchors/references/named
+/// sections re-emitted when present.
+pub fn write_population(population: &FullPopulation) -> String {
+    let mut lines = vec!["ISO-10303-21;".to_string(), "HEADER;".to_string()];
+    for (keyword, params) in &population.header {
+        lines.push(format!("{}({});", keyword, emit_params(params)));
+    }
+    lines.push("ENDSEC;".to_string());
+    if !population.anchors.is_empty() {
+        lines.push("ANCHOR;".to_string());
+        for (label, value) in &population.anchors {
+            lines.push(format!("<{label}> = {};", emit_value(value)));
+        }
+        lines.push("ENDSEC;".to_string());
+    }
+    if !population.references.is_empty() {
+        lines.push("REFERENCE;".to_string());
+        for (id, anchor) in &population.references {
+            lines.push(format!("#{id} = <{anchor}>;"));
+        }
+        lines.push("ENDSEC;".to_string());
+    }
+    if population.sections.is_empty() {
+        lines.push("DATA;".to_string());
+        emit_instances(&population.instances, &mut lines);
+        lines.push("ENDSEC;".to_string());
+    } else {
+        for section in &population.sections {
+            lines.push(named_data_line(section));
+            for id in &section.instance_ids {
+                if let Some((_, instance)) = population.instances.iter().find(|(key, _)| key == id)
+                {
+                    lines.push(format!("#{id}={};", emit_instance(instance)));
+                }
+            }
+            lines.push("ENDSEC;".to_string());
+        }
+    }
+    lines.push("END-ISO-10303-21;".to_string());
+    let mut out = lines.join("\n");
+    out.push('\n');
+    out
+}
+
+/// The parse + write round trip in one op (the delegation surface).
+pub fn round_trip_population(input: &str) -> Result<String, String> {
+    parse_full_population(input).map(|population| write_population(&population))
+}
+
+fn emit_instances(instances: &[(u64, Instance)], lines: &mut Vec<String>) {
+    for (id, instance) in instances {
+        lines.push(format!("#{id}={};", emit_instance(instance)));
+    }
+}
+
+fn named_data_line(section: &Section) -> String {
+    match &section.name {
+        None => "DATA;".to_string(),
+        Some(name) => {
+            let contexts = section
+                .contexts
+                .iter()
+                .map(|c| format!("'{c}'"))
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!("DATA ('{name}', ({contexts}));")
+        }
+    }
+}
+
+fn emit_instance(instance: &Instance) -> String {
+    match instance {
+        Instance::Complex(records) => {
+            let parts: Vec<String> = records.iter().map(emit_simple).collect();
+            format!("({})", parts.join(""))
+        }
+        Instance::Simple(record) => emit_simple(record),
+    }
+}
+
+fn emit_simple(record: &Record) -> String {
+    format!("{}({})", record.keyword, emit_params(&record.params))
+}
+
+fn emit_params(params: &[P21Value]) -> String {
+    params.iter().map(emit_value).collect::<Vec<_>>().join(",")
+}
+
+fn emit_value(value: &P21Value) -> String {
+    match value {
+        P21Value::Unset => "$".to_string(),
+        P21Value::Derived => "*".to_string(),
+        P21Value::Bool(true) => ".T.".to_string(),
+        P21Value::Bool(false) => ".F.".to_string(),
+        P21Value::Enum(name) => format!(".{name}."),
+        P21Value::Binary(hex) => format!("\"{hex}\""),
+        P21Value::Str(text) => format!("'{}'", text.replace('\'', "''")),
+        P21Value::Ref(id) => format!("#{id}"),
+        P21Value::Number(text) => text.clone(),
+        P21Value::Constant(text) => text.clone(),
+        P21Value::List(items) => {
+            let inner: Vec<String> = items.iter().map(emit_value).collect();
+            format!("({})", inner.join(","))
+        }
+        P21Value::Typed(typed) => format!("{}({})", typed.keyword, emit_params(&typed.params)),
+    }
+}
+
+// ---- the full-model builder over the artifact capture tree ----
+
+fn full_population_from_tree(tree: &Value) -> Result<FullPopulation, String> {
+    let mut population = FullPopulation::default();
+
+    if let Some(header_entities) = tree
+        .get("header_section")
+        .and_then(|h| h.get("header_entity"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for entity in header_entities {
+            let Some(simple) = entity.get("simple_record") else {
+                continue;
+            };
+            let keyword = leaf_text(simple, "keyword")
+                .ok_or("header entity missing its keyword")?
+                .trim_start_matches('!')
+                .to_string();
+            let params = record_params(simple)?;
+            population.header.push((keyword, params));
+        }
+    }
+
+    let sections = tree
+        .get("data_section")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("the exchange structure has no data section")?;
+    for section in sections {
+        let Some(body) = section.get("data_section") else {
+            continue;
+        };
+        let mut instance_ids = Vec::new();
+        if let Some(instances) = body
+            .get("instance_list")
+            .and_then(serde_json::Value::as_array)
+        {
+            for instance in instances {
+                if let Some(simple) = instance.get("simple_entity_instance") {
+                    let id = parse_id(simple)?;
+                    let keyword = keyword_of(simple, "simple_record")
+                        .ok_or("simple record missing its keyword")?
+                        .trim_start_matches('!')
+                        .to_string();
+                    let params = record_params(simple.get("simple_record").ok_or("wrapper")?)?;
+                    population
+                        .instances
+                        .push((id, Instance::Simple(Record { keyword, params })));
+                    instance_ids.push(id);
+                } else if let Some(complex) = instance.get("complex_entity_instance") {
+                    let id = parse_id(complex)?;
+                    let subs = complex
+                        .get("subsuper_record")
+                        .and_then(serde_json::Value::as_array)
+                        .ok_or("complex record missing its subsuper record")?;
+                    let mut records = Vec::new();
+                    for sub in subs {
+                        let record = sub
+                            .get("simple_record")
+                            .ok_or("part record wrapper missing")?;
+                        let keyword = leaf_text(record, "keyword")
+                            .ok_or("part record missing its keyword")?
+                            .trim_start_matches('!')
+                            .to_string();
+                        let params = record_params(record)?;
+                        records.push(Record { keyword, params });
+                    }
+                    population.instances.push((id, Instance::Complex(records)));
+                    instance_ids.push(id);
+                }
+            }
+        }
+        let section_tag = body.get("section_tag");
+        let (name, contexts) = match section_tag {
+            Some(tag) => {
+                // The ruby builder wraps a hash tag as {parameter: tag}
+                // and passes an array tag through as-is.
+                let entries: Vec<serde_json::Value> = match tag {
+                    serde_json::Value::Object(_) => {
+                        vec![serde_json::json!({"parameter": tag})]
+                    }
+                    serde_json::Value::Array(items) => items.clone(),
+                    _ => Vec::new(),
+                };
+                let values = build_parameter_list(entries)?;
+                let name = match values.first() {
+                    Some(P21Value::Str(text)) => Some(text.clone()),
+                    _ => None,
+                };
+                let contexts = match values.get(1) {
+                    Some(P21Value::List(items)) => items
+                        .iter()
+                        .filter_map(|v| match v {
+                            P21Value::Str(text) => Some(text.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                (name, contexts)
+            }
+            None => (None, Vec::new()),
+        };
+        population.sections.push(Section {
+            name,
+            contexts,
+            instance_ids,
+        });
+    }
+
+    if let Some(entries) = tree
+        .get("anchor_section")
+        .and_then(|a| a.get("anchor_entry"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for entry in entries {
+            let Some(body) = entry.get("anchor_entry") else {
+                continue;
+            };
+            let Some(label) = leaf_text(body, "anchor_label") else {
+                continue;
+            };
+            if let Some(id) = leaf_text(body, "entity_instance_name") {
+                let id = id.strip_prefix('#').unwrap_or(id);
+                let id: u64 = id
+                    .parse()
+                    .map_err(|err| format!("bad anchor target #{id}: {err}"))?;
+                population
+                    .anchors
+                    .push((label.to_string(), P21Value::Ref(id)));
+            } else if body.get("unset").is_some() {
+                population
+                    .anchors
+                    .push((label.to_string(), P21Value::Unset));
+            }
+        }
+    }
+
+    if let Some(instances) = tree
+        .get("reference_section")
+        .and_then(|r| r.get("instance_list"))
+        .and_then(serde_json::Value::as_array)
+    {
+        for instance in instances {
+            let Some(external) = instance.get("external_reference_instance") else {
+                continue;
+            };
+            let id = parse_id(external)?;
+            let target = leaf_text(external, "external_anchor")
+                .ok_or("external reference missing its anchor")?;
+            let target = target
+                .strip_prefix('<')
+                .and_then(|rest| rest.strip_suffix('>'))
+                .ok_or("external anchor must be wrapped in <>")?
+                .to_string();
+            population.references.push((id, target));
+        }
+    }
+
+    Ok(population)
+}
+
+/// A parameter_list capture: a hash when there is a single parameter,
+/// an array of {parameter: ...} entries otherwise.
+fn parameter_entries(capture: Option<&serde_json::Value>) -> Vec<serde_json::Value> {
+    match capture {
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .filter_map(|entry| entry.get("parameter"))
+            .filter(|p| !p.is_null())
+            .cloned()
+            .collect(),
+        Some(entry) => entry
+            .get("parameter")
+            .filter(|p| !p.is_null())
+            .map(|p| vec![p.clone()])
+            .unwrap_or_default(),
+    }
+}
+
+fn record_params(record: &serde_json::Value) -> Result<Vec<P21Value>, String> {
+    let entries = parameter_entries(record.get("parameter_list"));
+    let mut out = Vec::with_capacity(entries.len());
+    for param in &entries {
+        out.push(build_value(param)?);
+    }
+    Ok(out)
+}
+
+fn build_parameter_list(entries: Vec<serde_json::Value>) -> Result<Vec<P21Value>, String> {
+    // The entries arrive in the {parameter: ...} wrapper form.
+    let mut out = Vec::with_capacity(entries.len());
+    for entry in &entries {
+        let param = entry.get("parameter").unwrap_or(entry);
+        if param.is_null() {
+            continue;
+        }
+        out.push(build_value(param)?);
+    }
+    Ok(out)
+}
+
+fn build_value(param: &serde_json::Value) -> Result<P21Value, String> {
+    if let Some(typed) = param.get("typed_parameter") {
+        let keyword = leaf_text(typed, "keyword")
+            .ok_or("typed parameter missing its keyword")?
+            .trim_start_matches('!')
+            .to_string();
+        let params = record_params(typed)?;
+        return Ok(P21Value::Typed(Typed { keyword, params }));
+    }
+    if param.get("parameter_list").is_some() {
+        let entries = parameter_entries(param.get("parameter_list"));
+        let mut items = Vec::with_capacity(entries.len());
+        for entry in &entries {
+            items.push(build_value(entry)?);
+        }
+        return Ok(P21Value::List(items));
+    }
+    if let Some(text) = leaf_text(param, "entity_instance_name") {
+        let id = text
+            .strip_prefix('#')
+            .ok_or("entity instance name must start with #")?;
+        let id: u64 = id
+            .parse()
+            .map_err(|err| format!("bad reference #{id}: {err}"))?;
+        return Ok(P21Value::Ref(id));
+    }
+    if let Some(text) = param
+        .get("constant_reference")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| leaf_text(param, "constant_reference"))
+    {
+        return Ok(P21Value::Constant(text.to_string()));
+    }
+    if let Some(text) = leaf_text(param, "number_literal") {
+        return Ok(P21Value::Number(text.to_string()));
+    }
+    if let Some(text) = leaf_text(param, "enumeration") {
+        let name = text
+            .trim_start_matches('.')
+            .trim_end_matches('.')
+            .to_string();
+        return Ok(P21Value::Enum(name));
+    }
+    if let Some(text) = leaf_text(param, "binary_literal") {
+        let hex = text
+            .trim_start_matches('"')
+            .trim_end_matches('"')
+            .to_string();
+        return Ok(P21Value::Binary(hex));
+    }
+    if let Some(quoted) = leaf_text(param, "string_literal") {
+        return Ok(P21Value::Str(unescape_string(quoted)));
+    }
+    if param.get("unset").is_some() {
+        return Ok(P21Value::Unset);
+    }
+    if param.get("derived").is_some() {
+        return Ok(P21Value::Derived);
+    }
+    Err(format!("unrecognized parameter capture: {param}"))
+}
