@@ -28,6 +28,7 @@ pub mod validate_ascii;
 pub mod walk;
 pub mod wasm;
 pub mod xml_writer;
+pub mod xsd;
 
 pub use extract::extract_file;
 pub use model::*;
