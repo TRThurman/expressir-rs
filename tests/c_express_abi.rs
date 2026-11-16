@@ -84,6 +84,17 @@ fn c_abi_resolve_fills_cross_schema_base_paths() {
 }
 
 #[test]
+fn c_abi_round_trip_population() {
+    let src = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('DEMO'));\nENDSEC;\nDATA;\n#1=E('it''s',$,.T.);\nENDSEC;\nEND-ISO-10303-21;\n";
+    let text = take(abi::expr_round_trip_population(feed(src).as_ptr()));
+    assert!(text.contains("#1=E('it''s',$,.T.);"), "round trip: {text}");
+    assert!(
+        text.starts_with("ISO-10303-21;"),
+        "canonical header: {text}"
+    );
+}
+
+#[test]
 fn c_abi_population_surfaces() {
     let population = take(abi::expr_parse_population(feed(POPULATION).as_ptr()));
     assert!(population.contains("E"), "population: {population}");

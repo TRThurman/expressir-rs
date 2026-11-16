@@ -166,6 +166,24 @@ pub extern "C" fn expr_resolve(wire_json: *const c_char) -> *mut c_char {
     out(wire.to_string())
 }
 
+/// Parses an ISO-10303-21 exchange structure and re-emits it (#642):
+/// the parse → write round trip through the full value model. Returns
+/// the canonical text, or NULL with the error slot set.
+#[no_mangle]
+pub extern "C" fn expr_round_trip_population(source: *const c_char) -> *mut c_char {
+    let Some(source) = input(source) else {
+        set_error("source is NULL");
+        return std::ptr::null_mut();
+    };
+    match crate::population::round_trip_population(&source) {
+        Ok(text) => out(text),
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Parses an ISO-10303-21 population into its structural inventory JSON.
 #[no_mangle]
 pub extern "C" fn expr_parse_population(source: *const c_char) -> *mut c_char {

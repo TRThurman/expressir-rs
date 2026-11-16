@@ -162,6 +162,11 @@ pub fn check_json(wire_json: String, dialect: Option<String>) -> Result<String, 
     serde_json::to_string(&findings).map_err(|e| format!("serialize: {e}"))
 }
 
+/// Parses an ISO-10303-21 exchange structure and re-emits it (#642).
+pub fn round_trip_population_json(source: String) -> Result<String, String> {
+    crate::population::round_trip_population(&source)
+}
+
 /// Resolves a wire's references in place (#635); returns the resolved
 /// wire JSON.
 pub fn resolve_json(wire_json: String) -> Result<String, String> {
@@ -217,5 +222,10 @@ mod bindings {
     #[wasm_bindgen]
     pub fn resolve(wire_json: String) -> Result<String, String> {
         super::resolve_json(wire_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn round_trip_population(source: String) -> Result<String, String> {
+        super::round_trip_population_json(source)
     }
 }
