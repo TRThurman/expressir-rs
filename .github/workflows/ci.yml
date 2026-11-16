@@ -117,15 +117,13 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: "3.4"
-      # CI-only overlay: pin the parity bundle to the known-good
-      # lutaml-model. A fresh resolve lands 0.8.175, which drifts 19
-      # fixtures the same way 0.8.161 does (baseline-proven pre-existing
-      # wire drift — the hydration hypothesis was falsified and
-      # lutaml/lutaml-model#1160 closed). Drop this pin when the wire
-      # drift itself is aligned.
+      # The parity bundle resolves expressir's gemspec floors directly.
+      # The former 0.8.161 overlay is gone: expressir's floor moved to
+      # ~> 0.8.175 (the floors PR), and the drift the overlay once
+      # pinned around was baseline-proven identical on both versions
+      # (lutaml/lutaml-model#1160 closed as falsified).
       - run: |
           cd expressir
-          echo 'gem "lutaml-model", "0.8.161"' >> Gemfile
           bundle install --jobs 4
           cd -
       - run: |
