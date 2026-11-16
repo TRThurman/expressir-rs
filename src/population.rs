@@ -805,7 +805,7 @@ pub struct PopulationDiff {
 }
 
 pub fn diff_populations(base: &FullPopulation, revised: &FullPopulation) -> PopulationDiff {
-    fn find<'a>(population: &'a FullPopulation, id: u64) -> Option<&'a Instance> {
+    fn find(population: &FullPopulation, id: u64) -> Option<&Instance> {
         population
             .instances
             .iter()
