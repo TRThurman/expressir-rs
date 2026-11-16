@@ -196,13 +196,14 @@ fn instance_id(pid: &str) -> String {
     format!("id{}", pid.trim_start_matches('#'))
 }
 
-/// The 9.5.2/9.5.4 logical face re-encoding.
+/// The 9.5.2/9.5.4 logical face re-encoding; genuine enumeration
+/// items pass through as their declared text (9.6.1).
 fn logical_text(name: &str) -> String {
     match name.to_ascii_uppercase().as_str() {
         "T" => "true".to_string(),
         "F" => "false".to_string(),
         "UNKNOWN" => "unknown".to_string(),
-        other => other.to_string(),
+        _ => name.to_string(),
     }
 }
 
