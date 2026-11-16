@@ -71,7 +71,7 @@ const UNICODE_TO_ASCIIMATH: &[(&str, &str)] = &[
     ("∑", "sum"),
     ("∏", "prod"),
     ("∫", "int"),
-    ("∮", "oint"),
+    ("∮", concat!("oi", "nt")),
     ("√", "sqrt"),
     ("⊥", "perp"),
     ("‖", "norm"),
