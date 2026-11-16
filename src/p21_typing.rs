@@ -104,7 +104,7 @@ fn leaves_combinations(leaves: &[String]) -> Vec<(String, String)> {
 /// (case-insensitive; the checker's children map includes the
 /// interface closure).
 fn find_entity(ctx: &Ctx<'_>, schema: usize, keyword: &str) -> Option<String> {
-    let children = ctx.children_by_id(&ctx.schema_ptr(schema).to_string());
+    let children = ctx.children_by_id(ctx.schema_ptr(schema));
     children.get(&keyword.to_lowercase()).cloned()
 }
 
