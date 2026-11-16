@@ -95,7 +95,7 @@ fn coverage_surface_classifies_entities() {
 }
 
 #[test]
-fn writer_surfaces_emit_xml() {
+fn writer_and_symbol_surfaces() {
     let wire = wasm::wire_schema_json(SCHEMA.to_string()).expect("wire parse");
 
     let xsd = wasm::xsd_xml_json(wire.clone()).expect("xsd");
@@ -108,4 +108,7 @@ fn writer_surfaces_emit_xml() {
     )
     .expect("uos");
     assert!(uos.contains("<t:uos"), "{uos}");
+
+    let symbols = wasm::lsp_symbols_json(SCHEMA.to_string()).expect("symbols");
+    assert!(symbols.contains("\"kind\":"), "{symbols}");
 }

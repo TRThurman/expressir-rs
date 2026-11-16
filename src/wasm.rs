@@ -244,6 +244,11 @@ pub fn xsd_xml_json(schema_json: String) -> Result<String, String> {
     crate::xsd::xsd_xml_json(&schema_json)
 }
 
+/// The LSP document-symbol rows for one document's source (#646).
+pub fn lsp_symbols_json(source: String) -> Result<String, String> {
+    crate::lsp::symbols_json(&source)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod bindings {
     use wasm_bindgen::prelude::wasm_bindgen;
@@ -265,6 +270,11 @@ mod bindings {
     #[wasm_bindgen]
     pub fn xsd_xml(schema_json: String) -> Result<String, String> {
         super::xsd_xml_json(schema_json)
+    }
+
+    #[wasm_bindgen]
+    pub fn lsp_symbols(source: String) -> Result<String, String> {
+        super::lsp_symbols_json(source)
     }
 
     #[wasm_bindgen]
