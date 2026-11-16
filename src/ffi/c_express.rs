@@ -239,6 +239,136 @@ pub extern "C" fn expr_scan_ascii(source: *const c_char, check_remarks: i32) -> 
     }
 }
 
+/// Diffs two ISO-10303-21 exchange structures (#642): added, removed
+/// and changed instance ids. Returns the diff JSON, or NULL with the
+/// error slot set.
+#[no_mangle]
+pub extern "C" fn expr_diff_population(base: *const c_char, revised: *const c_char) -> *mut c_char {
+    let (Some(base), Some(revised)) = (input(base), input(revised)) else {
+        set_error("base or revised is NULL");
+        return std::ptr::null_mut();
+    };
+    let base = crate::population::parse_full_population(&base);
+    let revised = crate::population::parse_full_population(&revised);
+    match (base, revised) {
+        (Ok(base), Ok(revised)) => {
+            let diff = crate::population::diff_populations(&base, &revised);
+            match serde_json::to_string(&diff) {
+                Ok(json) => out(json),
+                Err(err) => {
+                    set_error(&format!("serialize: {err}"));
+                    std::ptr::null_mut()
+                }
+            }
+        }
+        (Err(err), _) | (_, Err(err)) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Serializes an ISO-10303-21 exchange structure to the tagged-value
+/// JSON wire (#642).
+#[no_mangle]
+pub extern "C" fn expr_population_json(source: *const c_char) -> *mut c_char {
+    let Some(source) = input(source) else {
+        set_error("source is NULL");
+        return std::ptr::null_mut();
+    };
+    match crate::population::parse_full_population(&source) {
+        Ok(population) => {
+            let wire = crate::population::population_to_json_value(&population);
+            out(wire.to_string())
+        }
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Types a population's instances against a schema wire (ISO
+/// 10303-11 9.2.5, #642). `schema_index` selects the schema among the
+/// wire's schemas. Returns the typing report JSON.
+#[no_mangle]
+pub extern "C" fn expr_type_population(
+    schema_wire: *const c_char,
+    schema_index: i32,
+    source: *const c_char,
+) -> *mut c_char {
+    let (Some(schema_wire), Some(source)) = (input(schema_wire), input(source)) else {
+        set_error("schema_wire or source is NULL");
+        return std::ptr::null_mut();
+    };
+    let wire: serde_json::Value = match serde_json::from_str(&schema_wire) {
+        Ok(value) => value,
+        Err(err) => {
+            set_error(&format!("schema wire: {err}"));
+            return std::ptr::null_mut();
+        }
+    };
+    match crate::population::parse_full_population(&source) {
+        Ok(population) => {
+            let report = crate::p21_typing::type_population(
+                &wire,
+                schema_index.max(0) as usize,
+                &population,
+            );
+            match serde_json::to_string(&report) {
+                Ok(json) => out(json),
+                Err(err) => {
+                    set_error(&format!("serialize: {err}"));
+                    std::ptr::null_mut()
+                }
+            }
+        }
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// Validates a population against a schema wire (ISO 10303-21 clause
+/// 12 semantics, #642). `schema_index` selects the schema. Returns
+/// the notes JSON.
+#[no_mangle]
+pub extern "C" fn expr_validate_population_semantic(
+    schema_wire: *const c_char,
+    schema_index: i32,
+    source: *const c_char,
+) -> *mut c_char {
+    let (Some(schema_wire), Some(source)) = (input(schema_wire), input(source)) else {
+        set_error("schema_wire or source is NULL");
+        return std::ptr::null_mut();
+    };
+    let wire: serde_json::Value = match serde_json::from_str(&schema_wire) {
+        Ok(value) => value,
+        Err(err) => {
+            set_error(&format!("schema wire: {err}"));
+            return std::ptr::null_mut();
+        }
+    };
+    match crate::population::parse_full_population(&source) {
+        Ok(population) => {
+            let report =
+                crate::p21_validator::validate(&wire, schema_index.max(0) as usize, &population);
+            match serde_json::to_string(&report) {
+                Ok(json) => out(json),
+                Err(err) => {
+                    set_error(&format!("serialize: {err}"));
+                    std::ptr::null_mut()
+                }
+            }
+        }
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Frees a string returned by any `expr_*` function.
 ///
 /// # Safety

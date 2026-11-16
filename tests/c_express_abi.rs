@@ -122,3 +122,42 @@ fn c_abi_error_contract_returns_null_and_last_error() {
         .into_owned();
     assert!(!err2.is_empty(), "error slot must update");
 }
+
+#[test]
+fn c_abi_p21_tooling_surfaces() {
+    const SRC: &str = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('DEMO'));\
+\nENDSEC;\nDATA;\n#1=POINT(1.5,.BLUE.);\n#2=LINE(#1);\nENDSEC;\nEND-ISO-10303-21;\n";
+    const REVISED: &str = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('DEMO'));\
+\nENDSEC;\nDATA;\n#1=POINT(2.0,.RED.);\n#3=LINE(#1);\nENDSEC;\nEND-ISO-10303-21;\n";
+
+    let diff = take(abi::expr_diff_population(
+        feed(SRC).as_ptr(),
+        feed(REVISED).as_ptr(),
+    ));
+    assert!(diff.contains("\"changed\":[1]"), "diff: {diff}");
+    assert!(diff.contains("\"added\":[3]"), "diff: {diff}");
+    assert!(diff.contains("\"removed\":[2]"), "diff: {diff}");
+
+    let wire = take(abi::expr_population_json(feed(SRC).as_ptr()));
+    assert!(wire.contains("\"POINT\""), "population wire: {wire}");
+
+    let schema = r#"{"_class":"Expressir::Model::ExpFile","schemas":[{"_class":"Expressir::Model::Declarations::Schema","id":"demo","entities":[{"_class":"Expressir::Model::Declarations::Entity","id":"point","attributes":[{"_class":"Expressir::Model::Declarations::Attribute","id":"x","type":{"_class":"Expressir::Model::DataTypes::Real"}}]},{"_class":"Expressir::Model::Declarations::Entity","id":"line","attributes":[{"_class":"Expressir::Model::Declarations::Attribute","id":"p","type":{"_class":"Expressir::Model::References::SimpleReference","id":"point"}}]}]}]}"#;
+
+    let typing = take(abi::expr_type_population(
+        feed(schema).as_ptr(),
+        0,
+        feed(SRC).as_ptr(),
+    ));
+    assert!(!typing.contains("\"sub1\""), "{typing}");
+    assert!(
+        typing.contains("point") || typing.contains("line"),
+        "typing: {typing}"
+    );
+
+    let notes = take(abi::expr_validate_population_semantic(
+        feed(schema).as_ptr(),
+        0,
+        feed(SRC).as_ptr(),
+    ));
+    assert!(notes.contains("\"notes\""), "validate: {notes}");
+}

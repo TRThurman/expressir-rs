@@ -162,6 +162,47 @@ pub fn check_json(wire_json: String, dialect: Option<String>) -> Result<String, 
     serde_json::to_string(&findings).map_err(|e| format!("serialize: {e}"))
 }
 
+/// Diffs two ISO-10303-21 exchange structures (#642).
+pub fn diff_population_json(base: String, revised: String) -> Result<String, String> {
+    let base = crate::population::parse_full_population(&base)?;
+    let revised = crate::population::parse_full_population(&revised)?;
+    let diff = crate::population::diff_populations(&base, &revised);
+    serde_json::to_string(&diff).map_err(|e| format!("serialize: {e}"))
+}
+
+/// Serializes an exchange structure to the tagged-value JSON wire (#642).
+pub fn population_wire_json(source: String) -> Result<String, String> {
+    let population = crate::population::parse_full_population(&source)?;
+    let wire = crate::population::population_to_json_value(&population);
+    serde_json::to_string(&wire).map_err(|e| format!("serialize: {e}"))
+}
+
+/// Types a population's instances against a schema wire (9.2.5, #642).
+pub fn type_population_json(
+    schema_wire: String,
+    schema_index: usize,
+    source: String,
+) -> Result<String, String> {
+    let wire: serde_json::Value =
+        serde_json::from_str(&schema_wire).map_err(|e| format!("schema wire: {e}"))?;
+    let population = crate::population::parse_full_population(&source)?;
+    let report = crate::p21_typing::type_population(&wire, schema_index, &population);
+    serde_json::to_string(&report).map_err(|e| format!("serialize: {e}"))
+}
+
+/// Validates a population against a schema wire (#642).
+pub fn validate_population_semantic_json(
+    schema_wire: String,
+    schema_index: usize,
+    source: String,
+) -> Result<String, String> {
+    let wire: serde_json::Value =
+        serde_json::from_str(&schema_wire).map_err(|e| format!("schema wire: {e}"))?;
+    let population = crate::population::parse_full_population(&source)?;
+    let report = crate::p21_validator::validate(&wire, schema_index, &population);
+    serde_json::to_string(&report).map_err(|e| format!("serialize: {e}"))
+}
+
 /// Scans an EXPRESS source for non-ASCII violations (#643).
 pub fn scan_ascii_json(source: String, check_remarks: bool) -> Result<String, String> {
     let violations = crate::validate_ascii::scan_source(&source, check_remarks);
@@ -238,5 +279,33 @@ mod bindings {
     #[wasm_bindgen]
     pub fn scan_ascii(source: String, check_remarks: bool) -> Result<String, String> {
         super::scan_ascii_json(source, check_remarks)
+    }
+
+    #[wasm_bindgen]
+    pub fn diff_population(base: String, revised: String) -> Result<String, String> {
+        super::diff_population_json(base, revised)
+    }
+
+    #[wasm_bindgen]
+    pub fn population_wire_json(source: String) -> Result<String, String> {
+        super::population_json(source)
+    }
+
+    #[wasm_bindgen]
+    pub fn type_population(
+        schema_wire: String,
+        schema_index: usize,
+        source: String,
+    ) -> Result<String, String> {
+        super::type_population_json(schema_wire, schema_index, source)
+    }
+
+    #[wasm_bindgen]
+    pub fn validate_population_semantic(
+        schema_wire: String,
+        schema_index: usize,
+        source: String,
+    ) -> Result<String, String> {
+        super::validate_population_semantic_json(schema_wire, schema_index, source)
     }
 }

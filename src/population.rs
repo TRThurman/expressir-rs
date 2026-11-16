@@ -14,6 +14,7 @@
 use std::sync::OnceLock;
 
 use parsanol::PargArtifact;
+use serde::Serialize;
 use serde_json::Value;
 
 const ARTIFACT_JSON: &str = include_str!("../assets/p21/iso-10303-21.artifact.json");
@@ -797,7 +798,7 @@ fn build_value(param: &serde_json::Value) -> Result<P21Value, String> {
 /// The instance-level comparison of two populations (the ruby
 /// `P21::Diff`): ids added/removed, and shared ids whose record
 /// keyword-or-parameter digest changed. Ids sort numerically.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PopulationDiff {
     pub added: Vec<u64>,
     pub removed: Vec<u64>,

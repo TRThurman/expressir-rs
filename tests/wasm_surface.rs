@@ -70,3 +70,13 @@ fn population_parse_and_validate() {
         .expect("validate");
     assert!(verdict.contains("\"valid\""), "verdict: {verdict}");
 }
+
+#[test]
+fn p21_tooling_surfaces() {
+    let src = "ISO-10303-21;\nHEADER;\nFILE_SCHEMA(('DEMO'));\nENDSEC;\nDATA;\n#1=E('v');\nENDSEC;\nEND-ISO-10303-21;\n".to_string();
+    let wire = wasm::population_wire_json(src.clone()).expect("population wire");
+    assert!(wire.contains("\"E\""), "{wire}");
+
+    let diff = wasm::diff_population_json(src.clone(), src).expect("diff");
+    assert!(diff.contains("\"added\":[]"), "{diff}");
+}
