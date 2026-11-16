@@ -130,3 +130,7 @@ jobs:
           RUST_MIN_STACK=67108864 EXPRESSIR_DIR=$PWD/expressir cargo test --release --test remark_attachment_parity
       - run: |
           RUST_MIN_STACK=67108864 EXPRESSIR_DIR=$PWD/expressir cargo test --release --test formatted_len_parity
+      # The coverage engine vs the ruby Expressir::Coverage walk
+      # (#644/#645): the delegation's order contract.
+      - run: |
+          RUST_MIN_STACK=67108864 EXPRESSIR_DIR=$PWD/expressir cargo test --release --test coverage_parity

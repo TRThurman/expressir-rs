@@ -21,11 +21,13 @@ pub mod model;
 pub mod model_json;
 pub mod p21_typing;
 pub mod p21_validator;
+pub mod p28;
 pub mod population;
 pub mod remark;
 pub mod validate_ascii;
 pub mod walk;
 pub mod wasm;
+pub mod xml_writer;
 
 pub use extract::extract_file;
 pub use model::*;
