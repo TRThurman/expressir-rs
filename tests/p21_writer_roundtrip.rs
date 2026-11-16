@@ -124,3 +124,18 @@ fn round_trips_a_constructed_population() {
     });
     assert_eq!(expected, reparsed);
 }
+
+#[test]
+fn json_interchange_is_value_identical() {
+    use expressir_rs::population::{population_from_json_value, population_to_json_value};
+    for (name, source) in corpus() {
+        let population = parse_full_population(&source)
+            .unwrap_or_else(|err| panic!("{name}: parse failed: {err}"));
+        let wire = population_to_json_value(&population);
+        let rebuilt = population_from_json_value(&wire)
+            .unwrap_or_else(|err| panic!("{name}: json rebuild failed: {err}"));
+        assert_eq!(population, rebuilt, "{name}: json interchange lost values");
+        let wire2 = population_to_json_value(&rebuilt);
+        assert_eq!(wire, wire2, "{name}: the json wire is not stable");
+    }
+}

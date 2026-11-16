@@ -878,3 +878,322 @@ mod diff_tests {
         assert_eq!(diff.changed, vec![2]);
     }
 }
+
+// ---- the JSON interchange (#642 PR-2): the tagged-value wire ----
+
+/// Serializes a full population to the tagged-value JSON wire (the
+/// ruby `P21::Json.to_value` shape): references, enumerations,
+/// binaries, unset/derived and typed values stay tagged so the round
+/// trip is value-identical. Numbers parse to JSON numbers — the ruby
+/// lane stores Integers/Floats too, so "1.50" and "1.5" interchange
+/// as the same value on both tiers.
+pub fn population_to_json_value(population: &FullPopulation) -> serde_json::Value {
+    serde_json::json!({
+        "header": population
+            .header
+            .iter()
+            .map(|(keyword, params)| {
+                serde_json::json!({
+                    "keyword": keyword,
+                    "params": values_to_wire(params),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "instances": population
+            .instances
+            .iter()
+            .map(|(id, instance)| {
+                (id.to_string(), instance_to_wire(id, instance))
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "sections": population
+            .sections
+            .iter()
+            .map(|section| {
+                serde_json::json!({
+                    "name": section.name,
+                    "contexts": section.contexts,
+                    "instance_ids": section
+                        .instance_ids
+                        .iter()
+                        .map(|id| id.to_string())
+                        .collect::<Vec<_>>(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        "anchors": population
+            .anchors
+            .iter()
+            .map(|(label, value)| {
+                (label.clone(), anchor_to_wire(value))
+            })
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+        "references": population
+            .references
+            .iter()
+            .map(|(id, anchor)| (id.to_string(), serde_json::Value::String(format!("<{anchor}>"))))
+            .collect::<serde_json::Map<String, serde_json::Value>>(),
+    })
+}
+
+/// Rebuilds a full population from the tagged-value JSON wire.
+pub fn population_from_json_value(wire: &serde_json::Value) -> Result<FullPopulation, String> {
+    let object = wire
+        .as_object()
+        .ok_or("the population wire must be an object")?;
+    let mut population = FullPopulation::default();
+
+    if let Some(header) = object.get("header").and_then(serde_json::Value::as_array) {
+        for entity in header {
+            let keyword = entity
+                .get("keyword")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("header entity missing its keyword")?
+                .to_string();
+            let params = wire_params(entity.get("params"))?;
+            population.header.push((keyword, params));
+        }
+    }
+
+    if let Some(instances) = object
+        .get("instances")
+        .and_then(serde_json::Value::as_object)
+    {
+        let mut parsed: Vec<(u64, Instance)> = instances
+            .iter()
+            .map(|(id, record)| {
+                let id: u64 = id
+                    .trim_start_matches('#')
+                    .parse()
+                    .map_err(|err| format!("bad instance id {id}: {err}"))?;
+                Ok((id, instance_from_wire(id, record)?))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        parsed.sort_by_key(|(id, _)| *id);
+        population.instances = parsed;
+    }
+
+    if let Some(sections) = object.get("sections").and_then(serde_json::Value::as_array) {
+        for section in sections {
+            let name = section
+                .get("name")
+                .and_then(serde_json::Value::as_str)
+                .map(String::from);
+            let contexts = section
+                .get("contexts")
+                .and_then(serde_json::Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(serde_json::Value::as_str)
+                        .map(String::from)
+                        .collect()
+                })
+                .unwrap_or_default();
+            let instance_ids = section
+                .get("instance_ids")
+                .and_then(serde_json::Value::as_array)
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|v| {
+                            v.as_str()
+                                .and_then(|text| text.trim_start_matches('#').parse().ok())
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            population.sections.push(Section {
+                name,
+                contexts,
+                instance_ids,
+            });
+        }
+    }
+
+    if let Some(anchors) = object.get("anchors").and_then(serde_json::Value::as_object) {
+        for (label, anchor) in anchors {
+            let value = match anchor {
+                serde_json::Value::String(text) if text == "unset" => P21Value::Unset,
+                serde_json::Value::String(text) if text.starts_with('#') => {
+                    let id: u64 = text
+                        .trim_start_matches('#')
+                        .parse()
+                        .map_err(|err| format!("bad anchor target {text}: {err}"))?;
+                    P21Value::Ref(id)
+                }
+                serde_json::Value::Number(number) => P21Value::Number(number.to_string()),
+                other => P21Value::Str(other.to_string()),
+            };
+            population.anchors.push((label.clone(), value));
+        }
+    }
+
+    if let Some(references) = object
+        .get("references")
+        .and_then(serde_json::Value::as_object)
+    {
+        for (id, anchor) in references {
+            let id: u64 = id
+                .trim_start_matches('#')
+                .parse()
+                .map_err(|err| format!("bad reference id {id}: {err}"))?;
+            let anchor = anchor
+                .as_str()
+                .ok_or("the reference anchor must be a string")?
+                .trim_start_matches('<')
+                .trim_end_matches('>')
+                .to_string();
+            population.references.push((id, anchor));
+        }
+    }
+
+    Ok(population)
+}
+
+fn instance_to_wire(_id: &u64, instance: &Instance) -> serde_json::Value {
+    match instance {
+        Instance::Complex(records) => serde_json::json!({
+            "complex": records.iter().map(simple_to_wire).collect::<Vec<_>>()
+        }),
+        Instance::Simple(record) => simple_to_wire(record),
+    }
+}
+
+fn instance_from_wire(id: u64, wire: &serde_json::Value) -> Result<Instance, String> {
+    if let Some(complex) = wire.get("complex").and_then(serde_json::Value::as_array) {
+        let mut records = Vec::with_capacity(complex.len());
+        for part in complex {
+            records.push(simple_from_wire(part)?);
+        }
+        return Ok(Instance::Complex(records));
+    }
+    Ok(Instance::Simple(
+        simple_from_wire(wire).map_err(|err| format!("#{id}: {err}"))?,
+    ))
+}
+
+fn simple_to_wire(record: &Record) -> serde_json::Value {
+    serde_json::json!({
+        "keyword": record.keyword,
+        "params": values_to_wire(&record.params),
+    })
+}
+
+fn simple_from_wire(wire: &serde_json::Value) -> Result<Record, String> {
+    let keyword = wire
+        .get("keyword")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("the record wire is missing its keyword")?
+        .to_string();
+    let params = wire_params(wire.get("params"))?;
+    Ok(Record { keyword, params })
+}
+
+fn wire_params(params: Option<&serde_json::Value>) -> Result<Vec<P21Value>, String> {
+    match params {
+        None | Some(serde_json::Value::Null) => Ok(Vec::new()),
+        Some(serde_json::Value::Array(items)) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(value_from_wire(item)?);
+            }
+            Ok(out)
+        }
+        Some(other) => Ok(vec![value_from_wire(other)?]),
+    }
+}
+
+fn values_to_wire(params: &[P21Value]) -> Vec<serde_json::Value> {
+    params.iter().map(value_to_wire).collect()
+}
+
+fn value_to_wire(value: &P21Value) -> serde_json::Value {
+    match value {
+        P21Value::Unset => serde_json::json!({"unset": true}),
+        P21Value::Derived => serde_json::json!({"derived": true}),
+        P21Value::Bool(flag) => serde_json::json!({"bool": flag}),
+        P21Value::Enum(name) => serde_json::json!({"enum": name}),
+        P21Value::Binary(hex) => serde_json::json!({"binary": hex}),
+        P21Value::Str(text) => serde_json::Value::String(text.clone()),
+        P21Value::Ref(id) => serde_json::json!({"ref": format!("#{id}")}),
+        P21Value::Number(text) => {
+            if let Ok(int) = text.parse::<i64>() {
+                serde_json::json!(int)
+            } else {
+                match text.parse::<f64>() {
+                    Ok(float) => serde_json::json!(float),
+                    Err(_) => serde_json::Value::String(text.clone()),
+                }
+            }
+        }
+        P21Value::Constant(text) => serde_json::json!({"constant": text}),
+        P21Value::List(items) => serde_json::Value::Array(values_to_wire(items)),
+        P21Value::Typed(typed) => serde_json::json!({
+            "typed": {
+                "keyword": typed.keyword,
+                "value": values_to_wire(&typed.params),
+            }
+        }),
+    }
+}
+
+fn value_from_wire(value: &serde_json::Value) -> Result<P21Value, String> {
+    match value {
+        serde_json::Value::Array(items) => {
+            let mut out = Vec::with_capacity(items.len());
+            for item in items {
+                out.push(value_from_wire(item)?);
+            }
+            Ok(P21Value::List(out))
+        }
+        serde_json::Value::Object(map) => {
+            if let Some(typed) = map.get("typed") {
+                let keyword = typed
+                    .get("keyword")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or("the typed value is missing its keyword")?
+                    .to_string();
+                let params = wire_params(typed.get("value"))?;
+                return Ok(P21Value::Typed(Typed { keyword, params }));
+            }
+            if let Some(name) = map.get("enum").and_then(serde_json::Value::as_str) {
+                return Ok(P21Value::Enum(name.to_string()));
+            }
+            if let Some(hex) = map.get("binary").and_then(serde_json::Value::as_str) {
+                return Ok(P21Value::Binary(hex.to_string()));
+            }
+            if map.get("unset").and_then(serde_json::Value::as_bool) == Some(true) {
+                return Ok(P21Value::Unset);
+            }
+            if map.get("derived").and_then(serde_json::Value::as_bool) == Some(true) {
+                return Ok(P21Value::Derived);
+            }
+            if let Some(flag) = map.get("bool").and_then(serde_json::Value::as_bool) {
+                return Ok(P21Value::Bool(flag));
+            }
+            if let Some(text) = map.get("constant").and_then(serde_json::Value::as_str) {
+                return Ok(P21Value::Constant(text.to_string()));
+            }
+            if let Some(text) = map.get("ref").and_then(serde_json::Value::as_str) {
+                let id: u64 = text
+                    .trim_start_matches('#')
+                    .parse()
+                    .map_err(|err| format!("bad ref {text}: {err}"))?;
+                return Ok(P21Value::Ref(id));
+            }
+            Err(format!("unrecognized tagged value: {value}"))
+        }
+        serde_json::Value::Number(number) => Ok(P21Value::Number(number.to_string())),
+        serde_json::Value::String(text) => Ok(P21Value::Str(text.clone())),
+        other => Err(format!("unrecognized wire value: {other}")),
+    }
+}
+
+fn anchor_to_wire(value: &P21Value) -> serde_json::Value {
+    match value {
+        P21Value::Unset => serde_json::Value::String("unset".to_string()),
+        P21Value::Ref(id) => serde_json::Value::String(format!("#{id}")),
+        other => value_to_wire(other),
+    }
+}
