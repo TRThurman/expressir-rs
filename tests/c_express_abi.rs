@@ -161,3 +161,40 @@ fn c_abi_p21_tooling_surfaces() {
     ));
     assert!(notes.contains("\"notes\""), "validate: {notes}");
 }
+
+/// The #644/#640/#641/#646 tier sweep: the coverage, uos, xsd and
+/// lsp-inventory entries on the same JSON/error-slot contract.
+#[test]
+fn writer_and_lsp_entries() {
+    use abi::{expr_coverage, expr_lsp_inventory, expr_uos_xml, expr_xsd_xml};
+
+    let wire = r#"{"_class":"Expressir::Model::ExpFile","schemas":[{"_class":"Expressir::Model::Declarations::Schema","id":"demo","entities":[{"_class":"Expressir::Model::Declarations::Entity","id":"point","remarks":["a point"],"attributes":[{"_class":"Expressir::Model::Declarations::Attribute","id":"x","type":{"_class":"Expressir::Model::DataTypes::Real"}}]}]}]}"#;
+    let coverage = take(expr_coverage(feed(wire).as_ptr(), feed("[]").as_ptr()));
+    assert!(coverage.contains("\"point\""), "coverage: {coverage}");
+    assert!(coverage.contains("\"documented\":"), "coverage: {coverage}");
+
+    let schema = r#"{"_class":"Expressir::Model::Declarations::Schema","id":"car_ownership","entities":[{"_class":"Expressir::Model::Declarations::Entity","id":"person","attributes":[{"_class":"Expressir::Model::Declarations::Attribute","id":"name"},{"_class":"Expressir::Model::Declarations::Attribute","id":"owns"}]},{"_class":"Expressir::Model::Declarations::Entity","id":"car","attributes":[{"_class":"Expressir::Model::Declarations::Attribute","id":"make"},{"_class":"Expressir::Model::Declarations::Attribute","id":"car_model"}]}]}"#;
+    let population = r##"{"instances":{"#10":{"keyword":"PERSON","params":["John Q. Public",{"ref":"#20"}]},"#20":{"keyword":"CAR","params":["BMW","Z3"]}}}"##;
+    let options = r#"{"id":"expdata01","target_namespace":"urn:co","prefix":"own"}"#;
+    let uos = take(expr_uos_xml(
+        feed(population).as_ptr(),
+        feed(schema).as_ptr(),
+        feed(options).as_ptr(),
+    ));
+    assert!(uos.starts_with("<own:uos"), "uos: {uos}");
+    assert!(uos.contains("<Name>John Q. Public</Name>"), "uos: {uos}");
+
+    let xsd = take(expr_xsd_xml(feed(schema).as_ptr()));
+    assert!(xsd.starts_with("<xs:schema"), "xsd: {xsd}");
+
+    let source = "SCHEMA demo;\n  ENTITY base;\n  END_ENTITY;\n  ENTITY sub SUBTYPE OF (base);\n  END_ENTITY;\nEND_SCHEMA;\n";
+    let inventory = take(expr_lsp_inventory(feed(source).as_ptr()));
+    assert!(
+        inventory.contains("\"declarations\""),
+        "inventory: {inventory}"
+    );
+    assert!(
+        inventory.contains("\"base_path\""),
+        "inventory: {inventory}"
+    );
+}
