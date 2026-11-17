@@ -1,0 +1,19 @@
+SCHEMA compare_gate;
+  TYPE status = ENUMERATION OF (good, bad);
+  END_TYPE;
+  ENTITY part;
+    name : STRING;
+    weight : REAL;
+  WHERE
+    named : name <> '';
+  END_ENTITY;
+  ENTITY assembly;
+    parts : LIST[1:?] OF part;
+  END_ENTITY;
+  FUNCTION total(items : LIST OF part) : REAL;
+  LOCAL
+    sum : REAL := 0.0;
+  END_LOCAL;
+    RETURN (sum);
+  END_FUNCTION;
+END_SCHEMA;

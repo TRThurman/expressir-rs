@@ -29,6 +29,7 @@ pub mod p21_validator;
 pub mod p28;
 pub mod population;
 pub mod remark;
+pub mod schema_compare;
 pub mod validate_ascii;
 pub mod walk;
 pub mod wasm;
