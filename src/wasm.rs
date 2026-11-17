@@ -249,6 +249,12 @@ pub fn lsp_symbols_json(source: String) -> Result<String, String> {
     crate::lsp::symbols_json(&source)
 }
 
+/// The LSP navigation inventory for one document's source (#646) —
+/// declarations + resolved references in one native pass.
+pub fn lsp_inventory_json(source: String) -> Result<String, String> {
+    crate::lsp::inventory_json(&source)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod bindings {
     use wasm_bindgen::prelude::wasm_bindgen;
@@ -275,6 +281,11 @@ mod bindings {
     #[wasm_bindgen]
     pub fn lsp_symbols(source: String) -> Result<String, String> {
         super::lsp_symbols_json(source)
+    }
+
+    #[wasm_bindgen]
+    pub fn lsp_inventory(source: String) -> Result<String, String> {
+        super::lsp_inventory_json(source)
     }
 
     #[wasm_bindgen]

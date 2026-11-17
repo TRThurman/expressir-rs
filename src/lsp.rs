@@ -129,7 +129,7 @@ fn position_valid(source: &str) -> bool {
 /// offset for `id` with word boundaries, case-insensitive; the match
 /// position is the WINDOW's character index (the ruby regex runs on a
 /// UTF-8 slice), mirrored exactly.
-fn name_offset(window: &[u8], offset: usize, id: &str) -> Option<usize> {
+pub(crate) fn name_offset(window: &[u8], offset: usize, id: &str) -> Option<usize> {
     let id_bytes = id.as_bytes();
     if id_bytes.is_empty() || id_bytes.len() > window.len() {
         return None;
@@ -317,9 +317,175 @@ pub fn symbols_json(source: &str) -> Result<String, String> {
     serde_json::to_string(&rows).map_err(|e| format!("rows json: {e}"))
 }
 
+/// The #646 PR-2 inventory: one native pass over a document producing
+/// the rows the LSP navigation runs on — declarations (id, class,
+/// selection byte, the fill's dot path) and references (selection
+/// byte, id, the resolved base_path). The wire is resolved first
+/// (checker::resolve_references — the same fill the delegation uses),
+/// so a reference's base_path and the declaration paths come from one
+/// machinery and match by construction; the ruby Workspace keeps the
+/// cross-document interface pass on top of these rows.
+pub fn inventory(source: &str) -> Result<serde_json::Value, String> {
+    let tree = crate::ParsedTree::parse(source).map_err(|e| format!("parse: {e:?}"))?;
+    let mut wire = tree
+        .to_model_json("document.exp")
+        .map_err(|e| format!("wire: {e:?}"))?;
+    crate::checker::resolve_references(&mut wire);
+    let ctx = crate::checker::Ctx::new(&wire);
+    let bytes = source.as_bytes();
+
+    let mut declarations: Vec<serde_json::Value> = Vec::new();
+    let mut references: Vec<serde_json::Value> = Vec::new();
+    walk_inventory(
+        &wire,
+        String::new(),
+        bytes,
+        &ctx,
+        &mut declarations,
+        &mut references,
+    );
+
+    Ok(serde_json::json!({
+        "declarations": declarations,
+        "references": references,
+    }))
+}
+
+/// The delegation entry: document text in, the inventory JSON out.
+pub fn inventory_json(source: &str) -> Result<String, String> {
+    let inventory = inventory(source)?;
+    serde_json::to_string(&inventory).map_err(|e| format!("inventory json: {e}"))
+}
+
+fn walk_inventory(
+    node: &Value,
+    ptr: String,
+    bytes: &[u8],
+    ctx: &crate::checker::Ctx<'_>,
+    declarations: &mut Vec<serde_json::Value>,
+    references: &mut Vec<serde_json::Value>,
+) {
+    let Value::Object(map) = node else { return };
+    let class = class_of(node).to_string();
+    if class.ends_with("::SimpleReference") {
+        // The ruby walk keeps EVERY reference; one without a capture
+        // offset still gets a location through name_offset's window
+        // search from byte 0 (source_offset.to_i), though it can never
+        // match a token (the nil offset never equals a byte).
+        if let Some(id) = map.get("id").and_then(Value::as_str) {
+            let sel = match map.get("source_offset").and_then(Value::as_u64) {
+                Some(offset) => {
+                    let window_end = ((offset as usize) + 1024).min(bytes.len());
+                    name_offset(&bytes[offset as usize..window_end], offset as usize, id)
+                        .unwrap_or(offset as usize)
+                }
+                None => name_offset(&bytes[..1024.min(bytes.len())], 0, id).unwrap_or(0),
+            };
+            references.push(serde_json::json!({
+                "sel_start": sel,
+                "offset": map.get("source_offset").and_then(Value::as_u64),
+                "id": id,
+                "base_path": map.get("base_path").and_then(Value::as_str),
+            }));
+        }
+    } else if symbol_kind(&class).is_some() {
+        if let (Some(id), Some(offset)) = (
+            map.get("id").and_then(Value::as_str),
+            map.get("source_offset").and_then(Value::as_u64),
+        ) {
+            let window_end = ((offset as usize) + 1024).min(bytes.len());
+            let sel = name_offset(&bytes[offset as usize..window_end], offset as usize, id)
+                .unwrap_or(offset as usize);
+            declarations.push(serde_json::json!({
+                "id": id,
+                "class": class,
+                "sel_start": sel,
+                "path": ctx.node_path(&ptr),
+            }));
+        }
+    }
+    for (key, value) in map {
+        if key == "_class" {
+            continue;
+        }
+        walk_value_inventory(
+            value,
+            &format!("{ptr}/{key}"),
+            bytes,
+            ctx,
+            declarations,
+            references,
+        );
+    }
+}
+
+fn walk_value_inventory(
+    value: &Value,
+    ptr: &str,
+    bytes: &[u8],
+    ctx: &crate::checker::Ctx<'_>,
+    declarations: &mut Vec<serde_json::Value>,
+    references: &mut Vec<serde_json::Value>,
+) {
+    match value {
+        Value::Object(_) => {
+            walk_inventory(value, ptr.to_string(), bytes, ctx, declarations, references)
+        }
+        Value::Array(items) => {
+            for (i, item) in items.iter().enumerate() {
+                walk_value_inventory(
+                    item,
+                    &format!("{ptr}/{i}"),
+                    bytes,
+                    ctx,
+                    declarations,
+                    references,
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use super::inventory_json;
     use super::symbols_json;
+
+    #[test]
+    fn inventories_declarations_and_resolved_references() {
+        let source = "SCHEMA demo;\n  ENTITY base;\n  END_ENTITY;\n  ENTITY sub SUBTYPE OF (base);\n    name : STRING;\n  END_ENTITY;\nEND_SCHEMA;\n";
+        let inventory: serde_json::Value =
+            serde_json::from_str(&inventory_json(source).expect("inventory")).expect("json");
+        let declarations = inventory["declarations"].as_array().expect("decls");
+        let ids: Vec<&str> = declarations
+            .iter()
+            .map(|d| d["id"].as_str().expect("id"))
+            .collect();
+        assert_eq!(ids, vec!["demo", "base", "sub", "name"], "{declarations:?}");
+
+        // The subtype's reference resolved onto the base entity's path.
+        let references = inventory["references"].as_array().expect("refs");
+        let base_ref = references
+            .iter()
+            .find(|r| r["id"] == "base")
+            .expect("the subtype reference");
+        let base_path = base_ref["base_path"].as_str().expect("resolved");
+        let target = declarations
+            .iter()
+            .find(|d| d["path"] == base_path)
+            .expect("the declaration at the base_path");
+        assert_eq!(target["id"], "base");
+
+        // The selection window lands on the identifier itself.
+        let sub = declarations.iter().find(|d| d["id"] == "sub").unwrap();
+        let at = sub["sel_start"].as_u64().expect("sel");
+        assert_eq!(
+            &source[at as usize..at as usize + 3],
+            "sub",
+            "the selection points at the identifier"
+        );
+    }
 
     #[test]
     fn inventories_declarations_with_spans() {
