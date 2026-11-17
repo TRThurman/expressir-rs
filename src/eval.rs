@@ -110,6 +110,10 @@ impl Ctx {
         self.population.as_ref()
     }
 
+    pub(crate) fn entities_ref(&self) -> &[Value] {
+        &self.entities
+    }
+
     pub(crate) fn entity_for_keyword(&self, keyword: &str) -> Option<&Value> {
         let key = keyword.to_lowercase();
         self.entities.iter().find(|e| {
