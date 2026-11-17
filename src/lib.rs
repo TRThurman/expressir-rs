@@ -15,6 +15,7 @@ pub mod compiled_set;
 pub mod coverage;
 pub mod eval;
 pub mod eval_builtins;
+pub mod eval_interpreter;
 pub mod extract;
 pub mod ffi;
 pub mod format_len;

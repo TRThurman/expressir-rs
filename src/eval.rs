@@ -40,7 +40,7 @@ pub enum AggKind {
 }
 
 /// Wire node classes.
-fn class_of(node: &Value) -> &str {
+pub(crate) fn class_of(node: &Value) -> &str {
     node.get("_class").and_then(Value::as_str).unwrap_or("")
 }
 
@@ -51,21 +51,95 @@ fn err<T>(message: impl Into<String>) -> Result<T, EvalError> {
     Err(EvalError(message.into()))
 }
 
+/// The schema context the interpreter lanes carry: the schema's
+/// functions (for call override) and types (for declared-type
+/// enumeration literals like `color.red`). The pure expression lane
+/// runs with no context — exactly the ruby Environment(schema: nil).
+#[derive(Clone, Default)]
+pub struct Ctx {
+    functions: Vec<Value>,
+    types: Vec<Value>,
+}
+
+impl Ctx {
+    pub fn from_schema(schema: &Value) -> Ctx {
+        Ctx {
+            functions: schema
+                .get("functions")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            types: schema
+                .get("types")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+        }
+    }
+
+    pub fn find_function(&self, name: &str) -> Option<&Value> {
+        let key = name.to_lowercase();
+        self.functions.iter().find(|f| {
+            f.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.to_lowercase() == key)
+        })
+    }
+
+    pub fn find_enum_type(&self, name: &str) -> Option<&Value> {
+        let key = name.to_lowercase();
+        self.types.iter().find(|t| {
+            t.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.to_lowercase() == key)
+                && t.get("underlying_type")
+                    .is_some_and(|u| class_of(u).ends_with("::Enumeration"))
+        })
+    }
+}
+
 /// The scope chain: the harness pre-seeds variables; QUERY pushes a
 /// frame (the ruby Environment.push).
 #[derive(Default)]
 pub struct Env {
     frames: Vec<Vec<(String, EvalValue)>>,
+    ctx: Option<Ctx>,
 }
 
 impl Env {
     pub fn with_variables(variables: Vec<(String, EvalValue)>) -> Self {
         Env {
             frames: vec![variables],
+            ctx: None,
         }
     }
 
-    fn lookup(&self, name: &str) -> Option<&EvalValue> {
+    pub fn with_variables_ctx(variables: Vec<(String, EvalValue)>, ctx: Ctx) -> Self {
+        Env {
+            frames: vec![variables],
+            ctx: Some(ctx),
+        }
+    }
+
+    pub(crate) fn ctx(&self) -> Option<&Ctx> {
+        self.ctx.as_ref()
+    }
+
+    pub(crate) fn define(&mut self, name: &str, value: EvalValue) {
+        let key = name.to_lowercase();
+        match self.frames.last_mut() {
+            Some(frame) => {
+                if let Some(slot) = frame.iter_mut().find(|(n, _)| *n == key) {
+                    slot.1 = value;
+                } else {
+                    frame.push((key, value));
+                }
+            }
+            None => self.frames.push(vec![(key, value)]),
+        }
+    }
+
+    pub(crate) fn lookup(&self, name: &str) -> Option<&EvalValue> {
         let key = name.to_lowercase();
         self.frames
             .iter()
@@ -76,7 +150,10 @@ impl Env {
     fn pushed(&self, name: &str, value: EvalValue) -> Env {
         let mut frames = self.frames.clone();
         frames.push(vec![(name.to_lowercase(), value)]);
-        Env { frames }
+        Env {
+            frames,
+            ctx: self.ctx.clone(),
+        }
     }
 }
 
@@ -229,6 +306,21 @@ fn evaluate_reference(node: &Value, env: &mut Env) -> Result<EvalValue, EvalErro
 /// context arrives with the population slice) or `instance.attr`.
 fn evaluate_attribute_reference(node: &Value, env: &mut Env) -> Result<EvalValue, EvalError> {
     let base = node.get("ref").unwrap_or(&Value::Null);
+    if class_of(base).ends_with("::SimpleReference") {
+        if let Some(ctx) = env.ctx() {
+            if let Some(_declaration) =
+                ctx.find_enum_type(base.get("id").and_then(Value::as_str).unwrap_or(""))
+            {
+                let item = node
+                    .get("attribute")
+                    .and_then(|a| a.get("id"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_string();
+                return Ok(EvalValue::Enumeration(item));
+            }
+        }
+    }
     let base_value = evaluate(base, env)?;
     if matches!(base_value, EvalValue::Indeterminate) {
         return Ok(EvalValue::Indeterminate);
@@ -362,6 +454,16 @@ fn evaluate_call(node: &Value, env: &mut Env) -> Result<EvalValue, EvalError> {
     if let Some(params) = node.get("parameters").and_then(Value::as_array) {
         for param in params {
             arguments.push(evaluate(param, env)?);
+        }
+    }
+    if let Some(ctx) = env.ctx() {
+        if let Some(function) = ctx.find_function(name) {
+            // A schema function gets a fresh scope (the ruby
+            // Environment.new inside execute_function) — a bare RETURN
+            // surfaces as Indeterminate here; the interpreter gate owns
+            // the nil-encoding contract.
+            return crate::eval_interpreter::call_function(function, arguments, ctx)
+                .map(|value| value.unwrap_or(EvalValue::Indeterminate));
         }
     }
     crate::eval_builtins::call_builtin(name, &arguments)

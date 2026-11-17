@@ -1,0 +1,174 @@
+SCHEMA eval_interp;
+
+  TYPE color_enum = ENUMERATION OF (red, green, blue);
+  END_TYPE;
+
+  FUNCTION add
+    (a : INTEGER; b : INTEGER) : INTEGER;
+    RETURN (a + b);
+  END_FUNCTION;
+
+  FUNCTION sum_to
+    (n : INTEGER) : INTEGER;
+  LOCAL
+    total : INTEGER := 0;
+  END_LOCAL;
+    REPEAT i := 1 TO n;
+      total := total + i;
+    END_REPEAT;
+    RETURN (total);
+  END_FUNCTION;
+
+  FUNCTION classify
+    (v : INTEGER) : INTEGER;
+  LOCAL
+    r : INTEGER := 0;
+  END_LOCAL;
+    CASE v OF
+      1, 2 : r := 10;
+      3 : r := 20;
+      OTHERWISE : r := 99;
+    END_CASE;
+    RETURN (r);
+  END_FUNCTION;
+
+  FUNCTION pick
+    (v : INTEGER) : INTEGER;
+  LOCAL
+    r : INTEGER := 0;
+  END_LOCAL;
+    IF v > 5 THEN
+      r := 100;
+    ELSE
+      r := 1;
+    END_IF;
+    RETURN (r);
+  END_FUNCTION;
+
+  FUNCTION skip_odds
+    (n : INTEGER) : INTEGER;
+  LOCAL
+    total : INTEGER := 0;
+  END_LOCAL;
+    REPEAT i := 1 TO n;
+      IF ODD(i) THEN
+        SKIP;
+      END_IF;
+      total := total + i;
+    END_REPEAT;
+    RETURN (total);
+  END_FUNCTION;
+
+  FUNCTION first_even
+    (n : INTEGER) : INTEGER;
+  LOCAL
+    found : INTEGER := 0;
+  END_LOCAL;
+    REPEAT i := 1 TO n;
+      IF NOT ODD(i) THEN
+        found := i;
+        ESCAPE;
+      END_IF;
+    END_REPEAT;
+    RETURN (found);
+  END_FUNCTION;
+
+  FUNCTION grow
+    (n : INTEGER) : LIST OF INTEGER;
+  LOCAL
+    items : LIST OF INTEGER := [];
+  END_LOCAL;
+    REPEAT i := 1 TO n;
+      items[i] := i * 2;
+    END_REPEAT;
+    RETURN (items);
+  END_FUNCTION;
+
+  FUNCTION patch
+    () : LIST OF INTEGER;
+  LOCAL
+    items : LIST OF INTEGER := [10, 20, 30];
+  END_LOCAL;
+    items[2] := 99;
+    items[-1] := 77;
+    RETURN (items);
+  END_FUNCTION;
+
+  FUNCTION chain
+    (n : INTEGER) : INTEGER;
+    RETURN (add(n, add(n, n)));
+  END_FUNCTION;
+
+  FUNCTION fact
+    (n : INTEGER) : INTEGER;
+    IF n <= 1 THEN
+      RETURN (1);
+    END_IF;
+    RETURN (n * fact(n - 1));
+  END_FUNCTION;
+
+  FUNCTION with_local_expr
+    (n : INTEGER) : INTEGER;
+  LOCAL
+    doubled : INTEGER := n * 2;
+  END_LOCAL;
+    RETURN (doubled + SIZEOF(QUERY(v <* [1, 2, 3] | v > n)));
+  END_FUNCTION;
+
+  FUNCTION color_same
+    () : LOGICAL;
+    RETURN (color_enum.red = color_enum.green);
+  END_FUNCTION;
+
+  FUNCTION color_value
+    () : INTEGER;
+  LOCAL
+    r : INTEGER := 0;
+  END_LOCAL;
+    IF color_enum.red = color_enum.red THEN
+      r := 7;
+    END_IF;
+    RETURN (r);
+  END_FUNCTION;
+
+  FUNCTION alias_err
+    (n : INTEGER) : INTEGER;
+  LOCAL
+    r : INTEGER := 0;
+  END_LOCAL;
+    ALIAS t FOR r;
+      r := 1;
+    END_ALIAS;
+    RETURN (r);
+  END_FUNCTION;
+
+  FUNCTION zero_step
+    (n : INTEGER) : LIST OF INTEGER;
+  LOCAL
+    items : LIST OF INTEGER := [];
+  END_LOCAL;
+    REPEAT i := 1 TO 3 BY 0;
+      items[1] := i;
+    END_REPEAT;
+    RETURN (items);
+  END_FUNCTION;
+
+  FUNCTION unknown_builtin
+    (n : INTEGER) : INTEGER;
+    RETURN (mystery_fn(n));
+  END_FUNCTION;
+
+  FUNCTION ends_without
+    (n : INTEGER) : INTEGER;
+  LOCAL
+    r : INTEGER := 0;
+  END_LOCAL;
+    r := n + 1;
+  END_FUNCTION;
+
+  FUNCTION unbound_body
+    (n : INTEGER) : INTEGER;
+    RETURN (ghost + 1);
+  END_FUNCTION;
+
+END_SCHEMA;
