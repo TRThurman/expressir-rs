@@ -23,6 +23,12 @@ pub enum EvalValue {
         kind: AggKind,
         elements: Vec<EvalValue>,
     },
+    /// A Part 21 instance: the record plus its id (the ruby
+    /// Values::Instance). Carried through the population lanes.
+    Instance {
+        id: u64,
+        record: crate::population::Instance,
+    },
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,6 +65,9 @@ fn err<T>(message: impl Into<String>) -> Result<T, EvalError> {
 pub struct Ctx {
     functions: Vec<Value>,
     types: Vec<Value>,
+    entities: Vec<Value>,
+    schema_id: String,
+    population: Option<crate::population::FullPopulation>,
 }
 
 impl Ctx {
@@ -74,7 +83,80 @@ impl Ctx {
                 .and_then(Value::as_array)
                 .cloned()
                 .unwrap_or_default(),
+            entities: schema
+                .get("entities")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default(),
+            schema_id: schema
+                .get("id")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+                .to_string(),
+            population: None,
         }
+    }
+
+    pub fn with_population(mut self, population: crate::population::FullPopulation) -> Ctx {
+        self.population = Some(population);
+        self
+    }
+
+    pub(crate) fn schema_id(&self) -> &str {
+        &self.schema_id
+    }
+
+    pub(crate) fn population(&self) -> Option<&crate::population::FullPopulation> {
+        self.population.as_ref()
+    }
+
+    pub(crate) fn entity_for_keyword(&self, keyword: &str) -> Option<&Value> {
+        let key = keyword.to_lowercase();
+        self.entities.iter().find(|e| {
+            e.get("id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id.to_lowercase() == key)
+        })
+    }
+
+    pub(crate) fn instance_for(&self, id: u64) -> Option<crate::population::Instance> {
+        let population = self.population.as_ref()?;
+        population
+            .instances
+            .iter()
+            .find(|(instance_id, _)| *instance_id == id)
+            .map(|(_, record)| record.clone())
+    }
+
+    /// The ruby Environment#slots_for: the supertype closure's
+    /// explicit attributes (nearest first) then the entity's own,
+    /// indexed in that order. Later duplicate ids overwrite the slot
+    /// but keep the first position (ruby Hash semantics).
+    pub(crate) fn slots_for(&self, entity: &Value) -> Vec<(String, usize)> {
+        let mut slots: Vec<(String, usize)> = Vec::new();
+        let mut chain: Vec<&Value> = supertype_closure(self, entity);
+        chain.push(entity);
+        let mut index = 0usize;
+        for candidate in chain {
+            for attribute in explicit_attributes(candidate) {
+                let name = attribute
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_lowercase();
+                if name.is_empty() {
+                    index += 1;
+                    continue;
+                }
+                if let Some(slot) = slots.iter_mut().find(|(n, _)| *n == name) {
+                    slot.1 = index;
+                } else {
+                    slots.push((name, index));
+                }
+                index += 1;
+            }
+        }
+        slots
     }
 
     pub fn find_function(&self, name: &str) -> Option<&Value> {
@@ -179,6 +261,9 @@ pub fn value_to_json(value: &EvalValue) -> Value {
                 "elements": elements.iter().map(value_to_json).collect::<Vec<_>>(),
             }
         }),
+        // The gate encoding of an instance is its #id tag, exactly the
+        // ruby Values::Instance#to_s.
+        EvalValue::Instance { id, .. } => json!(format!("#{id}")),
     }
 }
 
@@ -322,6 +407,16 @@ fn evaluate_attribute_reference(node: &Value, env: &mut Env) -> Result<EvalValue
         }
     }
     let base_value = evaluate(base, env)?;
+    if let EvalValue::Instance { record, .. } = &base_value {
+        let attribute = node
+            .get("attribute")
+            .and_then(|a| a.get("id"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if let Some(ctx) = env.ctx() {
+            return instance_attribute(record, attribute, ctx);
+        }
+    }
     if matches!(base_value, EvalValue::Indeterminate) {
         return Ok(EvalValue::Indeterminate);
     }
@@ -456,7 +551,8 @@ fn evaluate_call(node: &Value, env: &mut Env) -> Result<EvalValue, EvalError> {
             arguments.push(evaluate(param, env)?);
         }
     }
-    if let Some(ctx) = env.ctx() {
+    let ctx = env.ctx();
+    if let Some(ctx) = ctx {
         if let Some(function) = ctx.find_function(name) {
             // A schema function gets a fresh scope (the ruby
             // Environment.new inside execute_function) — a bare RETURN
@@ -466,7 +562,7 @@ fn evaluate_call(node: &Value, env: &mut Env) -> Result<EvalValue, EvalError> {
                 .map(|value| value.unwrap_or(EvalValue::Indeterminate));
         }
     }
-    crate::eval_builtins::call_builtin(name, &arguments)
+    crate::eval_builtins::call_builtin(name, &arguments, ctx)
 }
 
 fn evaluate_unary(node: &Value, env: &mut Env) -> Result<EvalValue, EvalError> {
@@ -1007,6 +1103,168 @@ fn aggregate_intersection(left: &EvalValue, right: &EvalValue) -> Result<EvalVal
     Ok(aggregate_of(kind, kept))
 }
 
+/// The ruby Entity#supertype_closure: BFS over subtype_of references
+/// resolved within the schema's entities, visited-set guarded.
+pub(crate) fn supertype_closure<'a>(ctx: &'a Ctx, entity: &Value) -> Vec<&'a Value> {
+    let mut closure: Vec<&Value> = Vec::new();
+    let mut visited: Vec<String> = vec![entity
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_lowercase()];
+    let mut queue: Vec<String> = entity
+        .get("subtype_of")
+        .and_then(Value::as_array)
+        .map(|refs| {
+            refs.iter()
+                .filter_map(|r| r.get("id").and_then(Value::as_str))
+                .map(|id| id.to_lowercase())
+                .collect()
+        })
+        .unwrap_or_default();
+    while let Some(name) = queue.first().cloned() {
+        queue.remove(0);
+        if name.is_empty() || visited.contains(&name) {
+            continue;
+        }
+        let Some(supertype) = ctx.entity_for_keyword(&name) else {
+            continue;
+        };
+        visited.push(name);
+        closure.push(supertype);
+        if let Some(refs) = supertype.get("subtype_of").and_then(Value::as_array) {
+            for r in refs {
+                if let Some(id) = r.get("id").and_then(Value::as_str) {
+                    queue.push(id.to_lowercase());
+                }
+            }
+        }
+    }
+    closure
+}
+
+/// The ruby explicit_attributes: EXACT class Attribute — derived,
+/// inverse and explicit-with-kind decorations live elsewhere.
+fn explicit_attributes(entity: &Value) -> Vec<&Value> {
+    entity
+        .get("attributes")
+        .and_then(Value::as_array)
+        .map(|attrs| {
+            attrs
+                .iter()
+                .filter(|a| class_of(a) == "Expressir::Model::Declarations::Attribute")
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The ruby Expression.instance_attribute: resolve the record part
+/// that carries the slot, then convert its parameter.
+pub(crate) fn instance_attribute(
+    instance: &crate::population::Instance,
+    name: &str,
+    ctx: &Ctx,
+) -> Result<EvalValue, EvalError> {
+    let record = match instance {
+        crate::population::Instance::Simple(record) => record,
+        crate::population::Instance::Complex(records) => {
+            let key = name.to_lowercase();
+            let found = records.iter().find(|record| {
+                ctx.entity_for_keyword(&record.keyword)
+                    .is_some_and(|entity| {
+                        ctx.slots_for(entity).iter().any(|(slot, _)| *slot == key)
+                    })
+            });
+            match found {
+                Some(record) => record,
+                None => return err(format!("attribute '{name}' is not mapped on the record")),
+            }
+        }
+    };
+    let Some(entity) = ctx.entity_for_keyword(&record.keyword) else {
+        return err(format!("unknown entity '{}'", record.keyword));
+    };
+    let key = name.to_lowercase();
+    let index = ctx
+        .slots_for(entity)
+        .into_iter()
+        .find(|(slot, _)| *slot == key)
+        .map(|(_, index)| index)
+        .ok_or_else(|| {
+            EvalError(format!(
+                "attribute '{name}' is not mapped on '{}'",
+                record.keyword
+            ))
+        })?;
+    match record.params.get(index) {
+        Some(param) => instance_value(param, ctx),
+        None => Ok(EvalValue::Indeterminate),
+    }
+}
+
+/// The ruby Expression.instance_value: P21 data becomes evaluator
+/// values at the instance boundary.
+pub(crate) fn instance_value(
+    raw: &crate::population::P21Value,
+    ctx: &Ctx,
+) -> Result<EvalValue, EvalError> {
+    use crate::population::P21Value;
+    Ok(match raw {
+        P21Value::Unset | P21Value::Derived => EvalValue::Indeterminate,
+        P21Value::Bool(value) => EvalValue::Logical(if *value {
+            Logical::True
+        } else {
+            Logical::False
+        }),
+        P21Value::Enum(name) => EvalValue::Enumeration(name.clone()),
+        P21Value::Binary(bits) => EvalValue::Binary(bits.clone()),
+        P21Value::Str(text) => {
+            if let Some(target) = text.strip_prefix('#') {
+                match target
+                    .parse::<u64>()
+                    .ok()
+                    .and_then(|id| ctx.instance_for(id))
+                {
+                    Some(record) => EvalValue::Instance {
+                        id: target.parse().unwrap_or(0),
+                        record,
+                    },
+                    None => EvalValue::Str(text.clone()),
+                }
+            } else {
+                EvalValue::Str(text.clone())
+            }
+        }
+        P21Value::Ref(id) => match ctx.instance_for(*id) {
+            Some(record) => EvalValue::Instance { id: *id, record },
+            None => EvalValue::Str(format!("#{}", id)),
+        },
+        P21Value::Number(text) => {
+            if let Ok(value) = text.parse::<i64>() {
+                EvalValue::Int(value)
+            } else {
+                EvalValue::Float(text.parse().unwrap_or(0.0))
+            }
+        }
+        P21Value::Constant(text) => EvalValue::Str(text.clone()),
+        P21Value::Typed(typed) => EvalValue::Aggregate {
+            kind: AggKind::List,
+            elements: typed
+                .params
+                .iter()
+                .map(|param| instance_value(param, ctx))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        P21Value::List(items) => EvalValue::Aggregate {
+            kind: AggKind::List,
+            elements: items
+                .iter()
+                .map(|item| instance_value(item, ctx))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+    })
+}
+
 pub fn values_equal(one: &EvalValue, other: &EvalValue) -> bool {
     match (one, other) {
         (EvalValue::Enumeration(a), EvalValue::Enumeration(b)) => a == b,
@@ -1049,6 +1307,7 @@ fn describe(value: &EvalValue) -> &'static str {
         EvalValue::Str(_) => "string",
         EvalValue::Int(_) | EvalValue::Float(_) => "number",
         EvalValue::Indeterminate => "?",
+        EvalValue::Instance { .. } => "instance",
     }
 }
 

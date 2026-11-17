@@ -54,7 +54,7 @@ pub fn call_json(schema_json: &str, name: &str, arguments_json: &str) -> Result<
         call_function(function, values, &ctx).map_err(|e| e.0)?
     } else {
         // The ruby interpreter falls through to the builtin table.
-        Some(crate::eval_builtins::call_builtin(name, &values).map_err(|e| e.0)?)
+        Some(crate::eval_builtins::call_builtin(name, &values, Some(&ctx)).map_err(|e| e.0)?)
     };
     let encoded = match result {
         Some(value) => value_to_json(&value),

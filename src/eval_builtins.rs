@@ -28,6 +28,7 @@ fn describe(value: &EvalValue) -> &'static str {
         EvalValue::Str(_) => "string",
         EvalValue::Int(_) | EvalValue::Float(_) => "number",
         EvalValue::Indeterminate => "?",
+        EvalValue::Instance { .. } => "instance",
     }
 }
 
@@ -47,7 +48,11 @@ fn logical(flag: bool) -> EvalValue {
 
 /// The slice-1 builtin table; the schema-function override arrives
 /// with the interpreter slice.
-pub fn call_builtin(name: &str, arguments: &[EvalValue]) -> Result<EvalValue, EvalError> {
+pub fn call_builtin(
+    name: &str,
+    arguments: &[EvalValue],
+    ctx: Option<&crate::eval::Ctx>,
+) -> Result<EvalValue, EvalError> {
     let upper = name.to_uppercase();
     let arg = |i: usize| -> Result<&EvalValue, EvalError> {
         arguments
@@ -102,17 +107,35 @@ pub fn call_builtin(name: &str, arguments: &[EvalValue]) -> Result<EvalValue, Ev
         "LOINDEX" | "LOBOUND" => Ok(EvalValue::Int(1)),
         "EXISTS" => Ok(logical(!matches!(arg(0)?, EvalValue::Indeterminate))),
         "TYPEOF" => match arg(0)? {
-            // Slice 1: instances arrive with the population slice.
-            EvalValue::Aggregate { .. } => Err(EvalError("TYPEOF requires a population".into())),
+            EvalValue::Instance { id, record } => {
+                let Some(ctx) = ctx else {
+                    return Ok(EvalValue::Aggregate {
+                        kind: AggKind::Set,
+                        elements: Vec::new(),
+                    });
+                };
+                typeof_value(*id, record, ctx)
+            }
             _ => Ok(EvalValue::Aggregate {
                 kind: AggKind::Set,
                 elements: Vec::new(),
             }),
         },
-        "USEDIN" => Ok(EvalValue::Aggregate {
-            kind: AggKind::Bag,
-            elements: Vec::new(),
-        }),
+        "USEDIN" => match arg(0)? {
+            EvalValue::Instance { id, .. } => {
+                let Some(ctx) = ctx else {
+                    return Ok(EvalValue::Aggregate {
+                        kind: AggKind::Bag,
+                        elements: Vec::new(),
+                    });
+                };
+                usedin_value(*id, ctx)
+            }
+            _ => Ok(EvalValue::Aggregate {
+                kind: AggKind::Bag,
+                elements: Vec::new(),
+            }),
+        },
         "NVL" => {
             if matches!(arg(0)?, EvalValue::Indeterminate) {
                 Ok(arg(1)?.clone())
@@ -161,6 +184,95 @@ pub fn call_builtin(name: &str, arguments: &[EvalValue]) -> Result<EvalValue, Ev
     }
 }
 
+/// The ruby Interpreter#typeof_value: the record keywords expanded
+/// through the supertype closure, unqualified and schema-qualified.
+fn typeof_value(
+    id: u64,
+    record: &crate::population::Instance,
+    ctx: &crate::eval::Ctx,
+) -> Result<EvalValue, EvalError> {
+    let keywords: Vec<String> = match record {
+        crate::population::Instance::Simple(record) => vec![record.keyword.clone()],
+        crate::population::Instance::Complex(records) => {
+            records.iter().map(|r| r.keyword.clone()).collect()
+        }
+    };
+    let mut names: Vec<String> = Vec::new();
+    for keyword in keywords {
+        let Some(entity) = ctx.entity_for_keyword(&keyword) else {
+            names.push(keyword.to_uppercase());
+            continue;
+        };
+        let mut chain: Vec<&Value> = crate::eval::supertype_closure(ctx, entity);
+        chain.insert(0, entity);
+        for candidate in chain {
+            let name = candidate.get("id").and_then(Value::as_str).unwrap_or("");
+            let schema = ctx.schema_id();
+            for form in [
+                name.to_uppercase(),
+                format!("{}.{}", schema.to_uppercase(), name.to_uppercase()),
+            ] {
+                if !names.contains(&form) {
+                    names.push(form);
+                }
+            }
+        }
+    }
+    let _ = id;
+    Ok(EvalValue::Aggregate {
+        kind: AggKind::Set,
+        elements: names.into_iter().map(EvalValue::Str).collect(),
+    })
+}
+
+/// The ruby Interpreter#usedin_value: instances whose records
+/// reference the target id, as a bag.
+fn usedin_value(id: u64, ctx: &crate::eval::Ctx) -> Result<EvalValue, EvalError> {
+    let mut referencing: Vec<EvalValue> = Vec::new();
+    if let Some(population) = ctx.population() {
+        for (instance_id, record) in &population.instances {
+            if record_references(record, id) {
+                referencing.push(EvalValue::Instance {
+                    id: *instance_id,
+                    record: record.clone(),
+                });
+            }
+        }
+    }
+    Ok(EvalValue::Aggregate {
+        kind: AggKind::Bag,
+        elements: referencing,
+    })
+}
+
+fn record_references(record: &crate::population::Instance, target: u64) -> bool {
+    use crate::population::Instance;
+    let records: &[crate::population::Record] = match record {
+        Instance::Simple(record) => std::slice::from_ref(record),
+        Instance::Complex(records) => records,
+    };
+    records.iter().any(|record| {
+        record
+            .params
+            .iter()
+            .any(|param| params_reference(param, target))
+    })
+}
+
+fn params_reference(param: &crate::population::P21Value, target: u64) -> bool {
+    use crate::population::P21Value;
+    match param {
+        P21Value::Ref(id) => *id == target,
+        P21Value::Str(text) => text.as_str() == format!("#{target}"),
+        P21Value::List(items) => items.iter().any(|item| params_reference(item, target)),
+        P21Value::Typed(typed) => typed
+            .params
+            .iter()
+            .any(|item| params_reference(item, target)),
+        _ => false,
+    }
+}
+
 /// The delegation entry: builtin name + JSON arguments in, the JSON
 /// value out.
 pub fn call_builtin_json(name: &str, arguments_json: &str) -> Result<String, String> {
@@ -170,6 +282,6 @@ pub fn call_builtin_json(name: &str, arguments_json: &str) -> Result<String, Str
         .iter()
         .map(crate::eval::value_from_json)
         .collect::<Result<Vec<_>, _>>()?;
-    let result = call_builtin(name, &values).map_err(|e| e.0)?;
+    let result = call_builtin(name, &values, None).map_err(|e| e.0)?;
     serde_json::to_string(&value_to_json(&result)).map_err(|e| format!("result json: {e}"))
 }

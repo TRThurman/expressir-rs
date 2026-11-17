@@ -1,0 +1,14 @@
+SCHEMA eval_rules_gate;
+  ENTITY base;
+    code : INTEGER;
+  END_ENTITY;
+
+  ENTITY node
+    SUBTYPE OF (base);
+    label : STRING;
+  WHERE
+    named : label <> '';
+    ghosted : ghost = 1;
+    check_code : code > 0;
+  END_ENTITY;
+END_SCHEMA;
