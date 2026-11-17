@@ -62,13 +62,6 @@ fn value_text(value: &Value) -> String {
     }
 }
 
-fn indent(text: &str) -> String {
-    text.split('\n')
-        .map(|line| format!("{INDENT}{line}"))
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 fn attrs_of(class: &str) -> &'static Vec<String> {
     static TABLE: OnceLock<std::collections::HashMap<String, Vec<String>>> = OnceLock::new();
     static EMPTY: Vec<String> = Vec::new();
@@ -185,6 +178,7 @@ pub fn format(root: &Value, no_remarks: bool) -> String {
     let mut f = Formatter {
         ctx: &ctx,
         no_remarks,
+        width: 2,
     };
     let schemas = arr(ctx.root, "schemas");
     let body = schemas
@@ -203,6 +197,19 @@ pub fn format(root: &Value, no_remarks: bool) -> String {
 struct Formatter<'a> {
     ctx: &'a PathCtx<'a>,
     no_remarks: bool,
+    /// The nesting width (the ruby self.indent() — PrettyFormatter
+    /// overrides it with its configured width).
+    width: usize,
+}
+
+impl<'a> Formatter<'a> {
+    fn indent(&self, text: &str) -> String {
+        let prefix = " ".repeat(self.width);
+        text.split('\n')
+            .map(|line| format!("{prefix}{line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 /// A RemarkInfo from the wire.
@@ -411,11 +418,11 @@ impl<'a> Formatter<'a> {
     // ---- declarations ----
 
     fn format_schema(&mut self, ptr: &str, node: &Value) -> String {
-        let preamble = self.format_preamble_remarks(ptr, &indent(INDENT));
+        let preamble = self.format_preamble_remarks(ptr, &self.indent(INDENT));
         let mut decls: Vec<String> = Vec::new();
         if !arr(node, "constants").is_empty() {
             let inner = self.list_join(ptr, "constants", "\n");
-            decls.push(format!("CONSTANT\n{}\nEND_CONSTANT;", indent(&inner)));
+            decls.push(format!("CONSTANT\n{}\nEND_CONSTANT;", self.indent(&inner)));
         }
         for field in [
             "types",
@@ -491,7 +498,7 @@ impl<'a> Formatter<'a> {
         let inverse = groups("INVERSE");
 
         let preamble = if !explicit.is_empty() {
-            self.format_preamble_remarks(ptr, &indent(INDENT))
+            self.format_preamble_remarks(ptr, &self.indent(INDENT))
         } else {
             None
         };
@@ -500,27 +507,26 @@ impl<'a> Formatter<'a> {
         let abstract_flag = truthy(node, "abstract");
         let has_supertype = obj(node, "supertype_expression").is_some();
         if abstract_flag && has_supertype {
+            let rendered = self.child(ptr, "supertype_expression");
             header.push_str(&format!(
                 "\n{}",
-                indent(&format!(
-                    "ABSTRACT SUPERTYPE OF ({})",
-                    self.child(ptr, "supertype_expression")
-                ))
+                self.indent(&format!("ABSTRACT SUPERTYPE OF ({rendered})"))
             ));
         } else if abstract_flag {
-            header.push_str(&format!("\n{}", indent("ABSTRACT SUPERTYPE")));
+            header.push_str(&format!("\n{}", self.indent("ABSTRACT SUPERTYPE")));
         } else if has_supertype {
+            let rendered = self.child(ptr, "supertype_expression");
             header.push_str(&format!(
                 "\n{}",
-                indent(&format!(
-                    "SUPERTYPE OF ({})",
-                    self.child(ptr, "supertype_expression")
-                ))
+                self.indent(&format!("SUPERTYPE OF ({rendered})"))
             ));
         }
         if !arr(node, "subtype_of").is_empty() {
             let subs = self.list_join(ptr, "subtype_of", ", ");
-            header.push_str(&format!("\n{}", indent(&format!("SUBTYPE OF ({subs})"))));
+            header.push_str(&format!(
+                "\n{}",
+                self.indent(&format!("SUBTYPE OF ({subs})"))
+            ));
         }
         header.push(';');
 
@@ -530,7 +536,7 @@ impl<'a> Formatter<'a> {
         }
         if !explicit.is_empty() {
             let body = self.join_grouped(&explicit, "\n", true);
-            out.push(indent(&body));
+            out.push(self.indent(&body));
         }
         for (label, group) in [("DERIVE", derived), ("INVERSE", inverse)] {
             if !group.is_empty() {
@@ -539,17 +545,17 @@ impl<'a> Formatter<'a> {
                     .map(|p| self.dispatch(p))
                     .collect::<Vec<_>>()
                     .join("\n");
-                out.push(format!("{label}\n{}", indent(&body)));
+                out.push(format!("{label}\n{}", self.indent(&body)));
             }
         }
         for (label, field) in [("UNIQUE", "unique_rules"), ("WHERE", "where_rules")] {
             if !arr(node, field).is_empty() {
                 let body = self.list_join(ptr, field, "\n");
-                out.push(format!("{label}\n{}", indent(&body)));
+                out.push(format!("{label}\n{}", self.indent(&body)));
             }
         }
         for remark in self.format_remark_items_children(ptr) {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         out.push(format!("END_ENTITY;{}", self.format_end_scope_remark(node)));
         out.join("\n")
@@ -563,10 +569,10 @@ impl<'a> Formatter<'a> {
         )];
         if !arr(node, "where_rules").is_empty() {
             let body = self.list_join(ptr, "where_rules", "\n");
-            out.push(format!("WHERE\n{}", indent(&body)));
+            out.push(format!("WHERE\n{}", self.indent(&body)));
         }
         for remark in self.format_remark_items_children(ptr) {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         out.push(format!("END_TYPE;{}", self.format_end_scope_remark(node)));
         out.join("\n")
@@ -619,29 +625,26 @@ impl<'a> Formatter<'a> {
         ] {
             if !arr(node, field).is_empty() {
                 let body = self.list_join(ptr, field, "\n");
-                out.push(indent(&body));
+                out.push(self.indent(&body));
             }
         }
         if !arr(node, "constants").is_empty() {
             let inner = self.list_join(ptr, "constants", "\n");
-            out.push(indent(&format!(
-                "CONSTANT\n{}\nEND_CONSTANT;",
-                indent(&inner)
-            )));
+            out.push(self.indent(&format!("CONSTANT\n{}\nEND_CONSTANT;", self.indent(&inner))));
         }
         if !arr(node, "variables").is_empty() {
             let inner = self.list_join_grouped(ptr, "variables", "\n", false);
-            out.push(indent(&format!("LOCAL\n{}\nEND_LOCAL;", indent(&inner))));
+            out.push(self.indent(&format!("LOCAL\n{}\nEND_LOCAL;", self.indent(&inner))));
         }
         if !arr(node, "statements").is_empty() {
             let body = self.list_join(ptr, "statements", "\n");
-            out.push(indent(&body));
+            out.push(self.indent(&body));
         }
         for remark in self.format_trailing_region_remarks(node, "statements") {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         for remark in self.format_remark_items_children(ptr) {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         out.push(format!(
             "{end_keyword};{}",
@@ -666,19 +669,16 @@ impl<'a> Formatter<'a> {
         ] {
             if !arr(node, field).is_empty() {
                 let body = self.list_join(ptr, field, "\n");
-                out.push(indent(&body));
+                out.push(self.indent(&body));
             }
         }
         if !arr(node, "constants").is_empty() {
             let inner = self.list_join(ptr, "constants", "\n");
-            out.push(indent(&format!(
-                "CONSTANT\n{}\nEND_CONSTANT;",
-                indent(&inner)
-            )));
+            out.push(self.indent(&format!("CONSTANT\n{}\nEND_CONSTANT;", self.indent(&inner))));
         }
         if !arr(node, "variables").is_empty() {
             let inner = self.list_join_grouped(ptr, "variables", "\n", false);
-            out.push(indent(&format!("LOCAL\n{}\nEND_LOCAL;", indent(&inner))));
+            out.push(self.indent(&format!("LOCAL\n{}\nEND_LOCAL;", self.indent(&inner))));
         }
         let stmt_count = arr(node, "statements").len();
         if stmt_count > 0 {
@@ -708,21 +708,21 @@ impl<'a> Formatter<'a> {
                     .map(|p| self.dispatch(p))
                     .collect::<Vec<_>>()
                     .join("\n");
-                out.push(indent(&body));
+                out.push(self.indent(&body));
             }
         }
         for remark in self.format_trailing_region_remarks(node, "statements") {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         if !arr(node, "where_rules").is_empty() {
             let body = self.list_join(ptr, "where_rules", "\n");
-            out.push(format!("WHERE\n{}", indent(&body)));
+            out.push(format!("WHERE\n{}", self.indent(&body)));
         }
         for remark in self.format_trailing_region_remarks(node, "where_rules") {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         for remark in self.format_remark_items_children(ptr) {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         out.push(format!("END_RULE;{}", self.format_end_scope_remark(node)));
         out.join("\n")
@@ -750,7 +750,7 @@ impl<'a> Formatter<'a> {
                 .map(|i| self.child(ptr, &format!("items/{i}")))
                 .collect::<Vec<_>>()
                 .join(&format!(",\n{item_indent}"));
-            out.push_str(&format!("\n{};", indent(&format!("({items})"))));
+            out.push_str(&format!("\n{};", self.indent(&format!("({items})"))));
         } else {
             out.push(';');
         }
@@ -886,20 +886,18 @@ impl<'a> Formatter<'a> {
             self.child(ptr, "applies_to")
         )];
         if truthy(node, "abstract") {
-            out.push(indent("ABSTRACT SUPERTYPE;"));
+            out.push(self.indent("ABSTRACT SUPERTYPE;"));
         }
         if !arr(node, "total_over").is_empty() {
             let items = self.list_join(ptr, "total_over", ", ");
-            out.push(indent(&format!("TOTAL_OVER({items});")));
+            out.push(self.indent(&format!("TOTAL_OVER({items});")));
         }
         if obj(node, "supertype_expression").is_some() {
-            out.push(indent(&format!(
-                "{};",
-                self.child(ptr, "supertype_expression")
-            )));
+            let rendered = self.child(ptr, "supertype_expression");
+            out.push(self.indent(&format!("{rendered};")));
         }
         for remark in self.format_remark_items_children(ptr) {
-            out.push(indent(&remark));
+            out.push(self.indent(&remark));
         }
         out.push(format!(
             "END_SUBTYPE_CONSTRAINT;{}",
@@ -1110,7 +1108,7 @@ impl<'a> Formatter<'a> {
     }
 
     /// `(item,\n  item)` with the one-space item indent, already wrapped
-    /// by `indent(...)` — the shape every enumeration/select site emits.
+    /// by `self.indent(...)` — the shape every enumeration/select site emits.
     fn indent_items(&mut self, ptr: &str, field: &str) -> String {
         let item_indent = " ".repeat("(".len());
         let count = arr(self.node(ptr), field).len();
@@ -1118,7 +1116,7 @@ impl<'a> Formatter<'a> {
             .map(|i| self.child(ptr, &format!("{field}/{i}")))
             .collect::<Vec<_>>()
             .join(&format!(",\n{item_indent}"));
-        indent(&format!("({items})"))
+        self.indent(&format!("({items})"))
     }
 
     // ---- literals + references ----
@@ -1359,10 +1357,10 @@ impl<'a> Formatter<'a> {
                 )];
                 if !arr(node, "statements").is_empty() {
                     let body = self.list_join(ptr, "statements", "\n");
-                    out.push(indent(&body));
+                    out.push(self.indent(&body));
                 }
                 for remark in self.format_block_end_remarks(ptr, node) {
-                    out.push(indent(&remark));
+                    out.push(self.indent(&remark));
                 }
                 out.push("END_ALIAS;".to_string());
                 out.join("\n")
@@ -1379,32 +1377,32 @@ impl<'a> Formatter<'a> {
                     out.push(self.child(ptr, &format!("actions/{j}")));
                 }
                 for remark in self.format_trailing_region_remarks(node, "action_statements") {
-                    out.push(indent(&remark));
+                    out.push(self.indent(&remark));
                 }
                 if obj(node, "otherwise_statement").is_some() {
                     let mid = self.format_mid_keyword_remarks(node, "otherwise");
                     out.push(format!("OTHERWISE :{mid}"));
-                    out.push(indent(&self.child(ptr, "otherwise_statement")));
+                    let rendered = self.child(ptr, "otherwise_statement");
+                    out.push(self.indent(&rendered));
                 }
                 for remark in self.format_trailing_region_remarks(node, "otherwise_statements") {
-                    out.push(indent(&remark));
+                    out.push(self.indent(&remark));
                 }
                 out.push("END_CASE;".to_string());
                 out.join("\n")
             }
-            "CaseAction" => format!(
-                "{} :\n{}",
-                self.list_join(ptr, "labels", ", "),
-                indent(&self.child(ptr, "statement"))
-            ),
+            "CaseAction" => format!("{} :\n{}", self.list_join(ptr, "labels", ", "), {
+                let rendered = self.child(ptr, "statement");
+                self.indent(&rendered)
+            }),
             "Compound" => {
                 let mut out = vec!["BEGIN".to_string()];
                 if !arr(node, "statements").is_empty() {
                     let body = self.list_join(ptr, "statements", "\n");
-                    out.push(indent(&body));
+                    out.push(self.indent(&body));
                 }
                 for remark in self.format_trailing_region_remarks(node, "statements") {
-                    out.push(indent(&remark));
+                    out.push(self.indent(&remark));
                 }
                 out.push("END;".to_string());
                 out.join("\n")
@@ -1415,23 +1413,23 @@ impl<'a> Formatter<'a> {
                 let then_trailing: Vec<String> = self
                     .format_trailing_region_remarks(node, "statements")
                     .into_iter()
-                    .map(|x| indent(&x))
+                    .map(|x| self.indent(&x))
                     .collect();
                 let else_trailing: Vec<String> = self
                     .format_trailing_region_remarks(node, "else_statements")
                     .into_iter()
-                    .map(|x| indent(&x))
+                    .map(|x| self.indent(&x))
                     .collect();
                 let mut out = vec![format!("IF {} THEN", self.child(ptr, "expression"))];
                 if !arr(node, "statements").is_empty() {
                     let body = self.list_join(ptr, "statements", "\n");
-                    out.push(indent(&body));
+                    out.push(self.indent(&body));
                 }
                 if has_else {
                     out.extend(then_trailing.clone());
                     let mid = self.format_mid_keyword_remarks(node, "else");
                     let else_body = self.list_join(ptr, "else_statements", "\n");
-                    out.push(format!("ELSE{mid}\n{}", indent(&else_body)));
+                    out.push(format!("ELSE{mid}\n{}", self.indent(&else_body)));
                     out.extend(else_trailing);
                 } else {
                     out.extend(then_trailing);
@@ -1470,10 +1468,10 @@ impl<'a> Formatter<'a> {
                 let mut out = vec![head];
                 if !arr(node, "statements").is_empty() {
                     let body = self.list_join(ptr, "statements", "\n");
-                    out.push(indent(&body));
+                    out.push(self.indent(&body));
                 }
                 for remark in self.format_block_end_remarks(ptr, node) {
-                    out.push(indent(&remark));
+                    out.push(self.indent(&remark));
                 }
                 out.push("END_REPEAT;".to_string());
                 out.join("\n")
@@ -1838,5 +1836,509 @@ impl<'a> Formatter<'a> {
             lines.push(formatted);
             lines.join("\n")
         }
+    }
+}
+
+// ---------------------------------------------------------------------
+// The PrettyFormatter (issue #637): the ELF pretty-printer — a port of
+// Expressir::Express::PrettyFormatter. It reuses the source Formatter
+// above (dispatch, grouped runs, the remark emitters) and applies the
+// pretty overrides: multi-line entity headers, aligned constant
+// blocks, wrapped function/procedure parameter lists, scope bodies,
+// the file preamble + provenance block, and the configured indent
+// width.
+// ---------------------------------------------------------------------
+
+/// The ruby PrettyFormatter::Configuration (defaults included).
+#[derive(Clone)]
+pub struct PrettyOptions {
+    pub indent: usize,
+    pub line_length: Option<u64>,
+    pub provenance_enabled: bool,
+    pub provenance_name: String,
+    pub provenance_version: String,
+    pub no_remarks: bool,
+}
+
+impl Default for PrettyOptions {
+    fn default() -> Self {
+        PrettyOptions {
+            indent: 4,
+            line_length: None,
+            provenance_enabled: true,
+            provenance_name: "Expressir".to_string(),
+            provenance_version: String::new(),
+            no_remarks: false,
+        }
+    }
+}
+
+impl PrettyOptions {
+    fn from_json(wire: &Value) -> Result<PrettyOptions, String> {
+        let mut options = PrettyOptions::default();
+        if let Some(indent) = wire.get("indent").and_then(Value::as_u64) {
+            options.indent = indent as usize;
+        }
+        if let Some(length) = wire.get("line_length") {
+            options.line_length = length.as_u64();
+        }
+        if let Some(provenance) = wire.get("provenance").and_then(Value::as_bool) {
+            options.provenance_enabled = provenance;
+        }
+        if let Some(name) = wire.get("provenance_name").and_then(Value::as_str) {
+            options.provenance_name = name.to_string();
+        }
+        if let Some(version) = wire.get("provenance_version").and_then(Value::as_str) {
+            options.provenance_version = version.to_string();
+        }
+        if let Some(no_remarks) = wire.get("no_remarks").and_then(Value::as_bool) {
+            options.no_remarks = no_remarks;
+        }
+        Ok(options)
+    }
+}
+
+/// The delegation entry: the model-hash wire + a node path ("" = the
+/// ExpFile root) + the options JSON in, the pretty text out.
+pub fn pretty_format(root: &Value, path: &str, options_json: &str) -> Result<String, String> {
+    let options = PrettyOptions::from_json(
+        &serde_json::from_str(options_json).map_err(|e| format!("options json: {e}"))?,
+    )?;
+    let ctx = PathCtx::new(root);
+    let mut f = Formatter {
+        ctx: &ctx,
+        no_remarks: options.no_remarks,
+        width: options.indent,
+    };
+    let pretty = PrettyFormatter { options };
+    if path.is_empty() {
+        return Ok(pretty.format_file(&mut f));
+    }
+    let node = f.node(path).clone();
+    Ok(match cls(&node).rsplit("::").next().unwrap_or("") {
+        "Schema" => pretty.format_schema(&mut f, path, &node),
+        "Entity" => pretty.format_entity(&mut f, path, &node),
+        "Function" => pretty.format_function(&mut f, path, &node),
+        "Procedure" => pretty.format_procedure(&mut f, path, &node),
+        "Rule" => pretty.format_rule(&mut f, path, &node),
+        _ => f.dispatch(path),
+    })
+}
+
+struct PrettyFormatter {
+    options: PrettyOptions,
+}
+
+impl PrettyFormatter {
+    fn indent_str(&self) -> String {
+        " ".repeat(self.options.indent)
+    }
+
+    /// The ruby PrettyFormatter#indent: every line prefixed.
+    fn indent(&self, text: &str) -> String {
+        let prefix = self.indent_str();
+        text.split('\n')
+            .map(|line| format!("{prefix}{line}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn provenance(&self) -> Option<String> {
+        if !self.options.provenance_enabled {
+            return None;
+        }
+        let mut params = vec![format!("indent: {}", self.options.indent)];
+        if let Some(length) = self.options.line_length {
+            params.push(format!("line_length: {length}"));
+        }
+        Some(
+            [
+                "(*".to_string(),
+                format!(
+                    "  Generated by: {} version {}",
+                    self.options.provenance_name, self.options.provenance_version
+                ),
+                format!("  Format parameters: {}", params.join(", ")),
+                "*)".to_string(),
+            ]
+            .join("\n"),
+        )
+    }
+
+    /// The file face (the ruby format_exp_file): preamble, provenance,
+    /// schemas joined with a blank line, trailing newline.
+    fn format_file(&self, f: &mut Formatter) -> String {
+        let mut out: Vec<String> = Vec::new();
+        if !f.no_remarks {
+            let remarks: Vec<&Value> = arr(f.ctx.root, "untagged_remarks")
+                .iter()
+                .filter(|remark| !self.provenance_remark(remark))
+                .collect();
+            if !remarks.is_empty() {
+                for remark in remarks {
+                    out.push(self.preamble_remark(remark));
+                }
+                out.push(String::new());
+            }
+        }
+        if let Some(provenance) = self.provenance() {
+            out.push(provenance);
+            out.push(String::new());
+        }
+        let schemas = arr(f.ctx.root, "schemas");
+        let body = schemas
+            .iter()
+            .enumerate()
+            .map(|(i, _)| {
+                let ptr = format!("/schemas/{i}");
+                let node = f.node(&ptr).clone();
+                self.format_schema(f, &ptr, &node)
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if !body.is_empty() {
+            out.push(body);
+        }
+        if out.is_empty() {
+            String::new()
+        } else {
+            format!("{}\n", out.join("\n"))
+        }
+    }
+
+    fn provenance_remark(&self, remark: &Value) -> bool {
+        str_fld(remark, "text").is_some_and(|text| {
+            text.trim_start().starts_with("Generated by:")
+                || text.trim_start().starts_with("Format parameters:")
+        })
+    }
+
+    /// The single preamble remark (the ruby format_preamble_remark).
+    fn preamble_remark(&self, remark: &Value) -> String {
+        let Some(text) = str_fld(remark, "text") else {
+            return String::new();
+        };
+        if text.is_empty() {
+            return String::new();
+        }
+        let tagged = str_fld(remark, "tag")
+            .filter(|tag| !tag.is_empty())
+            .map(|tag| format!("\"{tag}\" {text}"))
+            .unwrap_or_else(|| text.to_string());
+        if str_fld(remark, "format") == Some("tail") {
+            format!("-- {tagged}")
+        } else if tagged.contains('\n') {
+            ["(*".to_string(), tagged, "*)".to_string()].join("\n")
+        } else {
+            format!("(* {tagged} *)")
+        }
+    }
+
+    /// The pretty registry: everything the ruby PrettyFormatter
+    /// overrides routes through here — format(x) in the ruby
+    /// pretty emitters is the overridden dispatch.
+    fn pretty_dispatch(&self, f: &mut Formatter, ptr: &str) -> String {
+        let node = f.node(ptr).clone();
+        match cls(&node).rsplit("::").next().unwrap_or("") {
+            "Schema" => self.format_schema(f, ptr, &node),
+            "Entity" => self.format_entity(f, ptr, &node),
+            "Function" => self.format_function(f, ptr, &node),
+            "Procedure" => self.format_procedure(f, ptr, &node),
+            "Rule" => self.format_rule(f, ptr, &node),
+            _ => f.dispatch(ptr),
+        }
+    }
+
+    fn schema_declarations(&self, f: &mut Formatter, ptr: &str, node: &Value) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        let constants = arr(node, "constants");
+        if !constants.is_empty() {
+            let count = constants.len();
+            let ptrs: Vec<String> = (0..count).map(|i| format!("{ptr}/constants/{i}")).collect();
+            out.push(
+                [
+                    "CONSTANT".to_string(),
+                    self.indent(&self.constant_block(f, &ptrs)),
+                    "END_CONSTANT;".to_string(),
+                ]
+                .join("\n"),
+            );
+        }
+        for field in [
+            "types",
+            "entities",
+            "subtype_constraints",
+            "functions",
+            "rules",
+            "procedures",
+        ] {
+            let items = arr(node, field);
+            for i in 0..items.len() {
+                out.push(self.pretty_dispatch(f, &format!("{ptr}/{field}/{i}")));
+            }
+        }
+        out
+    }
+
+    /// The aligned constant block (the ruby format_constant_block).
+    fn constant_block(&self, f: &mut Formatter, ptrs: &[String]) -> String {
+        let names: Vec<&str> = ptrs
+            .iter()
+            .map(|p| id_of(f.node(p)).unwrap_or_default())
+            .collect();
+        let types: Vec<String> = ptrs.iter().map(|p| f.child(p, "type")).collect();
+        let name_width = names.iter().map(|n| n.len()).max().unwrap_or(0);
+        let type_width = types.iter().map(|t| t.len()).max().unwrap_or(0);
+        ptrs.iter()
+            .enumerate()
+            .map(|(i, p)| {
+                let name_pad = " ".repeat(name_width - names[i].len());
+                let type_pad = " ".repeat(type_width - types[i].len());
+                format!(
+                    "{}{} : {}{} := {};",
+                    names[i],
+                    name_pad,
+                    types[i],
+                    type_pad,
+                    f.child(p, "expression")
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    fn format_schema(&self, f: &mut Formatter, ptr: &str, node: &Value) -> String {
+        let indent_str = self.indent_str();
+        let preamble = f.format_preamble_remarks(ptr, &indent_str);
+        let declarations = self.schema_declarations(f, ptr, node);
+        let mut out = vec![f.format_schema_head(ptr, node)];
+        if let Some(preamble) = preamble.filter(|p| !p.is_empty()) {
+            out.push(String::new());
+            out.push(preamble.trim_end().to_string());
+        }
+        if !declarations.is_empty() {
+            out.push(String::new());
+            out.push(declarations.join("\n\n"));
+            out.push(String::new());
+        }
+        out.push(format!("END_SCHEMA;{}", f.format_end_scope_remark(node)));
+        out.join("\n")
+    }
+
+    /// Attribute items of an entity: explicit, then derived, then
+    /// inverse (the ruby entity_attribute_items selection by kind).
+    fn attribute_sections(
+        &self,
+        f: &mut Formatter,
+        ptr: &str,
+        node: &Value,
+    ) -> (Vec<String>, Vec<String>, Vec<String>) {
+        let attributes = arr(node, "attributes");
+        let count = attributes.len();
+        let mut explicit: Vec<String> = Vec::new();
+        let mut derived: Vec<String> = Vec::new();
+        let mut inverse: Vec<String> = Vec::new();
+        for i in 0..count {
+            let child = format!("{ptr}/attributes/{i}");
+            let kind = str_fld(f.node(&child), "kind").unwrap_or("EXPLICIT");
+            match kind {
+                "DERIVED" => derived.push(f.dispatch(&child)),
+                "INVERSE" => inverse.push(f.dispatch(&child)),
+                _ => explicit.push(child),
+            }
+        }
+        let explicit_rendered = if explicit.is_empty() {
+            Vec::new()
+        } else {
+            vec![self.indent(&f.join_grouped(&explicit, "\n", true))]
+        };
+        (explicit_rendered, derived, inverse)
+    }
+
+    fn format_entity(&self, f: &mut Formatter, ptr: &str, node: &Value) -> String {
+        let (explicit, derived, inverse) = self.attribute_sections(f, ptr, node);
+        let indent_str = self.indent_str();
+        let mut header = format!("ENTITY {}", id_of(node).unwrap_or_default());
+        let abstract_flag = node.get("abstract").and_then(Value::as_bool) == Some(true);
+        let supertype = obj(node, "supertype_expression");
+        if abstract_flag && supertype.is_none() {
+            header.push_str(&format!("\n{}ABSTRACT SUPERTYPE", indent_str));
+        } else if abstract_flag {
+            header.push_str(&format!(
+                "\n{}ABSTRACT SUPERTYPE OF ({})",
+                indent_str,
+                f.child(ptr, "supertype_expression")
+            ));
+        } else if supertype.is_some() {
+            header.push_str(&format!(
+                "\n{}SUPERTYPE OF ({})",
+                indent_str,
+                f.child(ptr, "supertype_expression")
+            ));
+        }
+        let subtype_of = arr(node, "subtype_of");
+        if !subtype_of.is_empty() {
+            let refs: Vec<String> = (0..subtype_of.len())
+                .map(|i| f.child(ptr, &format!("subtype_of/{i}")))
+                .collect();
+            header.push_str(&format!("\n{}SUBTYPE OF ({})", indent_str, refs.join(", ")));
+        }
+        header.push(';');
+        let preamble = f.format_preamble_remarks(ptr, &indent_str);
+        let mut out = vec![header];
+        if let Some(preamble) = preamble.filter(|p| !p.is_empty()) {
+            out.push(preamble.trim_end().to_string());
+        }
+        out.extend(explicit);
+        if !derived.is_empty() {
+            out.push("DERIVE".to_string());
+            out.push(self.indent(&derived.join("\n")));
+        }
+        if !inverse.is_empty() {
+            out.push("INVERSE".to_string());
+            out.push(self.indent(&inverse.join("\n")));
+        }
+        for (field, keyword) in
+            [("unique_rules", "UNIQUE"), ("where_rules", "WHERE")]
+        {
+            let items = arr(node, field);
+            if !items.is_empty() {
+                let rendered: Vec<String> = (0..items.len())
+                    .map(|i| f.dispatch(&format!("{ptr}/{field}/{i}")))
+                    .collect();
+                out.push(keyword.to_string());
+                out.push(self.indent(&rendered.join("\n")));
+            }
+        }
+        out.push(format!("END_ENTITY;{}", f.format_end_scope_remark(node)));
+        out.join("\n")
+    }
+
+    /// The shared scope body (types, entities, subtype constraints,
+    /// nested functions/procedures, constants, locals, statements).
+    fn scope_body(
+        &self,
+        f: &mut Formatter,
+        ptr: &str,
+        node: &Value,
+        tail_region: &str,
+    ) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for field in [
+            "types",
+            "entities",
+            "subtype_constraints",
+            "functions",
+            "procedures",
+        ] {
+            let items = arr(node, field);
+            if !items.is_empty() {
+                let rendered: Vec<String> = (0..items.len())
+                    .map(|i| self.pretty_dispatch(f, &format!("{ptr}/{field}/{i}")))
+                    .collect();
+                out.push(self.indent(&rendered.join("\n")));
+            }
+        }
+        let constants = arr(node, "constants");
+        if !constants.is_empty() {
+            let count = constants.len();
+            let ptrs: Vec<String> = (0..count).map(|i| format!("{ptr}/constants/{i}")).collect();
+            out.push(
+                self.indent(
+                    &[
+                        "CONSTANT".to_string(),
+                        self.indent(&self.constant_block(f, &ptrs)),
+                        "END_CONSTANT;".to_string(),
+                    ]
+                    .join("\n"),
+                ),
+            );
+        }
+        let variables = arr(node, "variables");
+        if !variables.is_empty() {
+            let count = variables.len();
+            let ptrs: Vec<String> = (0..count).map(|i| format!("{ptr}/variables/{i}")).collect();
+            out.push(
+                self.indent(
+                    &[
+                        "LOCAL".to_string(),
+                        self.indent(&f.join_grouped(&ptrs, "\n", false)),
+                        "END_LOCAL;".to_string(),
+                    ]
+                    .join("\n"),
+                ),
+            );
+        }
+        let statements = arr(node, "statements");
+        if !statements.is_empty() {
+            let rendered: Vec<String> = (0..statements.len())
+                .map(|i| f.dispatch(&format!("{ptr}/statements/{i}")))
+                .collect();
+            out.push(self.indent(&rendered.join("\n")));
+        }
+        for remark in f.format_trailing_region_remarks(node, tail_region) {
+            out.push(self.indent(&remark));
+        }
+        out
+    }
+
+    fn parameter_list(&self, f: &mut Formatter, ptr: &str, node: &Value) -> String {
+        let parameters = arr(node, "parameters");
+        let count = parameters.len();
+        let ptrs: Vec<String> = (0..count)
+            .map(|i| format!("{ptr}/parameters/{i}"))
+            .collect();
+        let id = id_of(node).unwrap_or_default();
+        let keyword = cls(node).rsplit("::").next().unwrap_or("").to_uppercase();
+        let pad = " ".repeat(format!("{keyword} {id}(").len());
+        f.join_grouped(&ptrs, &format!(";\n{pad}"), false)
+    }
+
+    fn format_function(&self, f: &mut Formatter, ptr: &str, node: &Value) -> String {
+        let id = id_of(node).unwrap_or_default();
+        let mut header = format!("FUNCTION {id}");
+        if !arr(node, "parameters").is_empty() {
+            header.push_str(&format!("({})", self.parameter_list(f, ptr, node)));
+        }
+        header.push_str(&format!(" : {};", f.child(ptr, "return_type")));
+        let mut out = vec![header];
+        out.extend(self.scope_body(f, ptr, node, "statements"));
+        out.push(format!("END_FUNCTION;{}", f.format_end_scope_remark(node)));
+        out.join("\n")
+    }
+
+    fn format_procedure(&self, f: &mut Formatter, ptr: &str, node: &Value) -> String {
+        let id = id_of(node).unwrap_or_default();
+        let mut header = format!("PROCEDURE {id}");
+        if !arr(node, "parameters").is_empty() {
+            header.push_str(&format!("({})", self.parameter_list(f, ptr, node)));
+        }
+        header.push(';');
+        let mut out = vec![header];
+        out.extend(self.scope_body(f, ptr, node, "statements"));
+        out.push(format!("END_PROCEDURE;{}", f.format_end_scope_remark(node)));
+        out.join("\n")
+    }
+
+    fn format_rule(&self, f: &mut Formatter, ptr: &str, node: &Value) -> String {
+        let id = id_of(node).unwrap_or_default();
+        let applies: Vec<String> = (0..arr(node, "applies_to").len())
+            .map(|i| f.child(ptr, &format!("applies_to/{i}")))
+            .collect();
+        let mut out = vec![format!("RULE {id} FOR ({});", applies.join(", "))];
+        out.extend(self.scope_body(f, ptr, node, "statements"));
+        let where_rules = arr(node, "where_rules");
+        if !where_rules.is_empty() {
+            let rendered: Vec<String> = (0..where_rules.len())
+                .map(|i| f.dispatch(&format!("{ptr}/where_rules/{i}")))
+                .collect();
+            out.push("WHERE".to_string());
+            out.push(self.indent(&rendered.join("\n")));
+        }
+        for remark in f.format_trailing_region_remarks(node, "where_rules") {
+            out.push(self.indent(&remark));
+        }
+        out.push(format!("END_RULE;{}", f.format_end_scope_remark(node)));
+        out.join("\n")
     }
 }
