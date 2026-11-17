@@ -389,13 +389,18 @@ fn walk_inventory(
             }));
         }
     } else if symbol_kind(&class).is_some() {
-        if let (Some(id), Some(offset)) = (
-            map.get("id").and_then(Value::as_str),
-            map.get("source_offset").and_then(Value::as_u64),
-        ) {
-            let window_end = ((offset as usize) + 1024).min(bytes.len());
-            let sel = name_offset(&bytes[offset as usize..window_end], offset as usize, id)
-                .unwrap_or(offset as usize);
+        // The ruby walk keeps EVERY id-bearing symbol declaration; one
+        // without a capture offset still gets a selection through
+        // name_offset's window search from byte 0 (source_offset.to_i).
+        if let Some(id) = map.get("id").and_then(Value::as_str) {
+            let sel = match map.get("source_offset").and_then(Value::as_u64) {
+                Some(offset) => {
+                    let window_end = ((offset as usize) + 1024).min(bytes.len());
+                    name_offset(&bytes[offset as usize..window_end], offset as usize, id)
+                        .unwrap_or(offset as usize)
+                }
+                None => name_offset(&bytes[..1024.min(bytes.len())], 0, id).unwrap_or(0),
+            };
             declarations.push(serde_json::json!({
                 "id": id,
                 "class": class,
@@ -550,13 +555,10 @@ mod tests {
         )
         .expect("json");
         let rows = edits.as_array().expect("rows");
-        // Two distinct positions: the declaration and the attribute
-        // type reference (which carries its own capture offset). The
-        // SUBTYPE OF reference shares the declaration's byte — it has
-        // no capture offset, so its name-window fallback lands on the
-        // declaration's own name — and the ruby Workspace's add_edit
-        // dedupes identical ranges the same way.
-        assert_eq!(rows.len(), 2, "the declaration + the attribute reference");
+        // Three distinct positions: the declaration, the SUBTYPE OF
+        // reference, and the attribute type reference — each stamped
+        // with its own capture offset.
+        assert_eq!(rows.len(), 3, "the declaration + both references");
         let at = rows[0]["sel_start"].as_u64().expect("sel");
         assert_eq!(&source[at as usize..at as usize + 4], "base");
     }

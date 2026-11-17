@@ -247,12 +247,17 @@ pub(crate) fn attach_offset(arena: &AstArena, subtree: &AstNode, value: &mut Val
 }
 
 /// SimpleReference{id} — never emits base_path; the Ruby reference
-/// resolver owns that attribute.
+/// resolver owns that attribute. The capture offset IS stamped: the
+/// ruby builder positions its references (an LSP token must match the
+/// reference it points at), and the wire gates compare positions only
+/// when both sides carry them, so the stamps are additive.
 pub(crate) fn simple_ref(arena: &AstArena, host: &AstNode, id_keys: &[&str]) -> Option<Value> {
     let id = ref_id(arena, host, id_keys)?;
     let mut m = node(CLASS_SIMPLE_REFERENCE);
     m.insert("id".into(), Value::String(id));
-    Some(obj(m))
+    let mut value = Value::Object(m);
+    attach_offset(arena, host, &mut value);
+    Some(value)
 }
 
 /// extract_id_ref: text of the first present id key, else the first

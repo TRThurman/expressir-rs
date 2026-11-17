@@ -158,7 +158,7 @@ fn byte_of(bytes: &[u8], starts: &[usize], line: usize, character: usize) -> usi
 /// offset-stamping family from the inventory gate). The gate goes
 /// required when that family lands.
 #[test]
-#[ignore = "capture parity: expressir-rs#91 - subtype reference offset stamping"]
+
 fn lsp_rename_edits_match_the_ruby_workspace_byte_for_byte() {
     let Some(expressir_dir) = expressir_dir() else {
         eprintln!("EXPRESSIR_DIR not set; skipping");
