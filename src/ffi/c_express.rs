@@ -369,6 +369,93 @@ pub extern "C" fn expr_validate_population_semantic(
     }
 }
 
+/// The documentation-coverage engine (#644): wire JSON + a JSON array
+/// of skip expressions in, the per-schema row report out.
+#[no_mangle]
+pub extern "C" fn expr_coverage(
+    wire_json: *const c_char,
+    skip_types_json: *const c_char,
+) -> *mut c_char {
+    let Some(wire_json) = input(wire_json) else {
+        set_error("wire_json is NULL");
+        return std::ptr::null_mut();
+    };
+    let Some(skip_types_json) = input(skip_types_json) else {
+        set_error("skip_types_json is NULL");
+        return std::ptr::null_mut();
+    };
+    match crate::coverage::coverage_model_json(&wire_json, &skip_types_json) {
+        Ok(json) => out(json),
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// The clause 9 uos binding writer (#640): population + schema wires
+/// and the options object in, the uos document out.
+#[no_mangle]
+pub extern "C" fn expr_uos_xml(
+    population_json: *const c_char,
+    schema_json: *const c_char,
+    options_json: *const c_char,
+) -> *mut c_char {
+    let Some(population_json) = input(population_json) else {
+        set_error("population_json is NULL");
+        return std::ptr::null_mut();
+    };
+    let Some(schema_json) = input(schema_json) else {
+        set_error("schema_json is NULL");
+        return std::ptr::null_mut();
+    };
+    let Some(options_json) = input(options_json) else {
+        set_error("options_json is NULL");
+        return std::ptr::null_mut();
+    };
+    match crate::p28::uos_xml_json(&population_json, &schema_json, &options_json) {
+        Ok(xml) => out(xml),
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// The EXPRESS-to-XML-Schema writer (#641): a schema wire in, the
+/// xs:schema document out.
+#[no_mangle]
+pub extern "C" fn expr_xsd_xml(schema_json: *const c_char) -> *mut c_char {
+    let Some(schema_json) = input(schema_json) else {
+        set_error("schema_json is NULL");
+        return std::ptr::null_mut();
+    };
+    match crate::xsd::xsd_xml_json(&schema_json) {
+        Ok(xml) => out(xml),
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
+/// The LSP navigation inventory (#646): a document source in, the
+/// declarations + resolved references rows out.
+#[no_mangle]
+pub extern "C" fn expr_lsp_inventory(source: *const c_char) -> *mut c_char {
+    let Some(source) = input(source) else {
+        set_error("source is NULL");
+        return std::ptr::null_mut();
+    };
+    match crate::lsp::inventory_json(&source) {
+        Ok(json) => out(json),
+        Err(err) => {
+            set_error(&err);
+            std::ptr::null_mut()
+        }
+    }
+}
+
 /// Frees a string returned by any `expr_*` function.
 ///
 /// # Safety
