@@ -114,4 +114,8 @@ fn writer_and_symbol_surfaces() {
 
     let inventory = wasm::lsp_inventory_json(SCHEMA.to_string()).expect("inventory");
     assert!(inventory.contains("\"declarations\""), "{inventory}");
+
+    let edits = wasm::lsp_rename_edits_json(SCHEMA.to_string(), "document.exp.demo.e".to_string())
+        .expect("edits");
+    assert!(edits.contains("sel_start"), "{edits}");
 }

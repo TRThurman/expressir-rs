@@ -447,9 +447,64 @@ fn walk_value_inventory(
     }
 }
 
+/// The #646 PR-3 rename edits for one document: the positions to
+/// replace when the declaration at `path` is renamed — the
+/// declaration's own selection plus every resolved reference's — as
+/// byte rows. The ruby Workspace orchestrates the per-document calls,
+/// adds the cross-document interface pass, and runs the parse
+/// verification probes; this engine carries the local match set.
+pub fn rename_edits(source: &str, path: &str) -> Result<Vec<serde_json::Value>, String> {
+    let inventory = inventory(source)?;
+    let mut edits: Vec<serde_json::Value> = Vec::new();
+    let mut target_id: Option<String> = None;
+    for declaration in inventory["declarations"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        if declaration["path"].as_str() == Some(path) {
+            target_id = declaration["id"].as_str().map(str::to_string);
+            edits.push(serde_json::json!({
+                "sel_start": declaration["sel_start"],
+                "sel_len": declaration["id"].as_str().map(str::len).unwrap_or(0),
+            }));
+        }
+    }
+    // The ruby rename_references precondition: only references whose
+    // OWN id matches the declaration's (case-insensitively) are
+    // edited — a renamed interface alias (`shared_part AS item`)
+    // keeps its local name.
+    for reference in inventory["references"]
+        .as_array()
+        .cloned()
+        .unwrap_or_default()
+    {
+        let id_matches = target_id
+            .as_deref()
+            .zip(reference["id"].as_str())
+            .is_some_and(|(target, id)| id.eq_ignore_ascii_case(target));
+        if reference["base_path"].as_str() == Some(path) && id_matches {
+            edits.push(serde_json::json!({
+                "sel_start": reference["sel_start"],
+                "sel_len": reference["id"].as_str().map(str::len).unwrap_or(0),
+            }));
+        }
+    }
+    edits.sort_by_key(|edit| edit["sel_start"].as_u64().unwrap_or(u64::MAX));
+    edits.dedup_by(|a, b| a["sel_start"] == b["sel_start"]);
+    Ok(edits)
+}
+
+/// The delegation entry: source + path in, the edit rows out.
+pub fn rename_edits_json(source: &str, path: &str) -> Result<String, String> {
+    let edits = rename_edits(source, path)?;
+    serde_json::to_string(&edits).map_err(|e| format!("edits json: {e}"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::inventory_json;
+    use super::rename_edits_json;
     use super::symbols_json;
 
     #[test]
@@ -485,6 +540,25 @@ mod tests {
             "sub",
             "the selection points at the identifier"
         );
+    }
+
+    #[test]
+    fn rename_edits_cover_the_declaration_and_its_references() {
+        let source = "SCHEMA demo;\n  ENTITY base;\n  END_ENTITY;\n  ENTITY sub SUBTYPE OF (base);\n    name : base;\n  END_ENTITY;\nEND_SCHEMA;\n";
+        let edits: serde_json::Value = serde_json::from_str(
+            &rename_edits_json(source, "document.exp.demo.base").expect("edits"),
+        )
+        .expect("json");
+        let rows = edits.as_array().expect("rows");
+        // Two distinct positions: the declaration and the attribute
+        // type reference (which carries its own capture offset). The
+        // SUBTYPE OF reference shares the declaration's byte — it has
+        // no capture offset, so its name-window fallback lands on the
+        // declaration's own name — and the ruby Workspace's add_edit
+        // dedupes identical ranges the same way.
+        assert_eq!(rows.len(), 2, "the declaration + the attribute reference");
+        let at = rows[0]["sel_start"].as_u64().expect("sel");
+        assert_eq!(&source[at as usize..at as usize + 4], "base");
     }
 
     #[test]
