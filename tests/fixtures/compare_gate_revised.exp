@@ -1,0 +1,20 @@
+SCHEMA compare_gate;
+  ENTITY part;
+    name : STRING;
+    code : INTEGER;
+  WHERE
+    named : name <> '';
+  END_ENTITY;
+  ENTITY assembly;
+    parts : SET OF part;
+  END_ENTITY;
+  ENTITY bundle;
+    parts : ARRAY[1:3] OF part;
+  END_ENTITY;
+  FUNCTION total(items : LIST OF part) : REAL;
+  LOCAL
+    sum : REAL := 0.0;
+  END_LOCAL;
+    RETURN (sum + 1.0);
+  END_FUNCTION;
+END_SCHEMA;
