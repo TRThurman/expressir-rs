@@ -255,6 +255,11 @@ pub fn lsp_inventory_json(source: String) -> Result<String, String> {
     crate::lsp::inventory_json(&source)
 }
 
+/// The LSP rename edit rows for one document's declaration path (#646).
+pub fn lsp_rename_edits_json(source: String, path: String) -> Result<String, String> {
+    crate::lsp::rename_edits_json(&source, &path)
+}
+
 #[cfg(target_arch = "wasm32")]
 mod bindings {
     use wasm_bindgen::prelude::wasm_bindgen;
@@ -286,6 +291,11 @@ mod bindings {
     #[wasm_bindgen]
     pub fn lsp_inventory(source: String) -> Result<String, String> {
         super::lsp_inventory_json(source)
+    }
+
+    #[wasm_bindgen]
+    pub fn lsp_rename_edits(source: String, path: String) -> Result<String, String> {
+        super::lsp_rename_edits_json(source, path)
     }
 
     #[wasm_bindgen]
