@@ -172,6 +172,54 @@ fn node_path(ctx: &PathCtx, ptr: &str) -> Option<String> {
     }
 }
 
+/// The reference-hyperlink flavors (expressir#637, slice 2): the
+/// mixin faces of the ruby Formatter family. `Source` = plain ids;
+/// `Hyperlink` = the stepmod `{{{<<express:...>>}}}` markup
+/// (HyperlinkFormatter); `Adoc` = AsciiDoc xref macros
+/// (AdocHyperlinkFormatter).
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Flavor {
+    Source,
+    Hyperlink,
+    Adoc,
+}
+
+/// `head_only` = the SchemaHeadFormatter face: a Schema renders as
+/// its head alone.
+pub fn format_flavored(root: &Value, path: &str, options_json: &str) -> Result<String, String> {
+    let options: Value =
+        serde_json::from_str(options_json).map_err(|e| format!("options json: {e}"))?;
+    let flavor = match options.get("flavor").and_then(Value::as_str) {
+        Some("hyperlink") => Flavor::Hyperlink,
+        Some("adoc") => Flavor::Adoc,
+        _ => Flavor::Source,
+    };
+    let no_remarks = options.get("no_remarks").and_then(Value::as_bool) == Some(true);
+    let head_only = options.get("head_only").and_then(Value::as_bool) == Some(true);
+    let ctx = PathCtx::new(root);
+    let mut f = Formatter {
+        ctx: &ctx,
+        no_remarks,
+        width: 2,
+        flavor,
+        head_only,
+    };
+    if path.is_empty() {
+        let schemas = arr(ctx.root, "schemas");
+        let body = schemas
+            .iter()
+            .enumerate()
+            .map(|(i, _)| f.dispatch(&format!("/schemas/{i}")))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        if body.is_empty() {
+            return Ok(String::new());
+        }
+        return Ok(format!("{body}\n"));
+    }
+    Ok(f.dispatch(path))
+}
+
 /// Renders the wire (an ExpFile) to EXPRESS text.
 pub fn format(root: &Value, no_remarks: bool) -> String {
     let ctx = PathCtx::new(root);
@@ -179,6 +227,8 @@ pub fn format(root: &Value, no_remarks: bool) -> String {
         ctx: &ctx,
         no_remarks,
         width: 2,
+        flavor: Flavor::Source,
+        head_only: false,
     };
     let schemas = arr(ctx.root, "schemas");
     let body = schemas
@@ -200,6 +250,8 @@ struct Formatter<'a> {
     /// The nesting width (the ruby self.indent() — PrettyFormatter
     /// overrides it with its configured width).
     width: usize,
+    flavor: Flavor,
+    head_only: bool,
 }
 
 impl<'a> Formatter<'a> {
@@ -418,6 +470,9 @@ impl<'a> Formatter<'a> {
     // ---- declarations ----
 
     fn format_schema(&mut self, ptr: &str, node: &Value) -> String {
+        if self.head_only {
+            return self.format_schema_head(ptr, node);
+        }
         let preamble = self.format_preamble_remarks(ptr, &self.indent(INDENT));
         let mut decls: Vec<String> = Vec::new();
         if !arr(node, "constants").is_empty() {
@@ -1143,7 +1198,61 @@ impl<'a> Formatter<'a> {
 
     fn format_reference(&mut self, ptr: &str, node: &Value, t: &str) -> String {
         match t {
-            "SimpleReference" => id_of(node).unwrap_or_default().to_string(),
+            "SimpleReference" => {
+                let id = id_of(node).unwrap_or_default().to_string();
+                if self.flavor == Flavor::Source {
+                    return id;
+                }
+                let Some(base_path) = str_fld(node, "base_path") else {
+                    return id;
+                };
+                if self.flavor == Flavor::Adoc {
+                    let parts: Vec<&str> = base_path.split('.').collect();
+                    if parts.len() < 2 {
+                        return id;
+                    }
+                    return format!("<<{},{}>>", parts[parts.len() - 2..].join("."), id);
+                }
+                // The ruby walk: the closest node with a path (the
+                // reference itself); skip when it shares the
+                // reference's first two path parts (same schema).
+                let mut parts: Vec<&str> = Vec::new();
+                let mut current = ptr.to_string();
+                loop {
+                    let owner = self.ctx.node(&current);
+                    if !is(owner, "References::SimpleReference") {
+                        parts.push(id_of(owner).unwrap_or(""));
+                    }
+                    match self.ctx.parent.get(&current) {
+                        Some(parent) if !parent.is_empty() => current = parent.clone(),
+                        _ => break,
+                    }
+                }
+                // The walk stops at the schema (the parent map's top);
+                // the ExpFile root contributes id-ELSE-path (the ruby
+                // path rule), giving the leading part the fills use.
+                if current.starts_with("/schemas/") {
+                    parts.push(
+                        id_of(self.ctx.root)
+                            .or_else(|| str_fld(self.ctx.root, "path"))
+                            .unwrap_or(""),
+                    );
+                }
+                parts.reverse();
+                // The comparison is on the path STRINGS split by '.'
+                // (a dotted file name splits on both sides alike).
+                let path = parts.join(".");
+                let path_parts: Vec<&str> = path.split('.').collect();
+                let base_parts: Vec<&str> = base_path.split('.').collect();
+                let same_head = path_parts.len().min(2) == base_parts.len().min(2)
+                    && path_parts[..path_parts.len().min(2)]
+                        == base_parts[..base_parts.len().min(2)];
+                if same_head {
+                    id
+                } else {
+                    format!("{{{{<<express:{base_path},{id}>>}}}}")
+                }
+            }
             "AttributeReference" => format!(
                 "{}.{}",
                 self.child(ptr, "ref"),
@@ -1909,6 +2018,8 @@ pub fn pretty_format(root: &Value, path: &str, options_json: &str) -> Result<Str
         ctx: &ctx,
         no_remarks: options.no_remarks,
         width: options.indent,
+        flavor: Flavor::Source,
+        head_only: false,
     };
     let pretty = PrettyFormatter { options };
     if path.is_empty() {
@@ -2198,9 +2309,7 @@ impl PrettyFormatter {
             out.push("INVERSE".to_string());
             out.push(self.indent(&inverse.join("\n")));
         }
-        for (field, keyword) in
-            [("unique_rules", "UNIQUE"), ("where_rules", "WHERE")]
-        {
+        for (field, keyword) in [("unique_rules", "UNIQUE"), ("where_rules", "WHERE")] {
             let items = arr(node, field);
             if !items.is_empty() {
                 let rendered: Vec<String> = (0..items.len())
