@@ -1,0 +1,26 @@
+<ep:uos id="uos01" express="p28_reader_gate" xmlns:ep="URN:my_company.com:iso_10303_28/p28_reader_gate" xmlns:exp="urn:iso:std:iso:10303:-28:ed-2:tech:XMLschema:common">
+  <ep:thing id="id1">
+    <Label>gadget</Label>
+    <Flag>true</Flag>
+    <State>unknown</State>
+    <Tint>red</Tint>
+    <Bits>1010</Bits>
+    <Size>5</Size>
+    <Ratio>2.5</Ratio>
+    <Tags>alpha beta</Tags>
+    <Owner ref="id2"></Owner>
+    <Peers>
+      <ep:thing ref="id2"></ep:thing>
+    </Peers>
+  </ep:thing>
+  <ep:thing id="id2">
+    <Label>widget</Label>
+    <Flag>false</Flag>
+    <State>true</State>
+    <Tint>green</Tint>
+    <Bits>0110</Bits>
+    <Size>7</Size>
+    <Ratio>0.25</Ratio>
+    <Tags>solo</Tags>
+  </ep:thing>
+</ep:uos>

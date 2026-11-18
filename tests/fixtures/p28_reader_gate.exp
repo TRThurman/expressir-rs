@@ -1,0 +1,16 @@
+SCHEMA p28_reader_gate;
+  TYPE color = ENUMERATION OF (red, green);
+  END_TYPE;
+  ENTITY thing;
+    label : STRING;
+    flag : BOOLEAN;
+    state : LOGICAL;
+    tint : color;
+    bits : BINARY;
+    size : INTEGER;
+    ratio : REAL;
+    tags : LIST OF STRING;
+    owner : thing;
+    peers : LIST OF thing;
+  END_ENTITY;
+END_SCHEMA;

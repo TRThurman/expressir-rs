@@ -543,3 +543,775 @@ mod tests {
         assert!(xml.contains("<Car_model>Z3</Car_model>"), "{xml}");
     }
 }
+
+// ---------------------------------------------------------------------
+// The reader faces (expressir#640): the minimal XML reader for the
+// iso_10303_28/uos document subset, then Uos.parse and Document.parse
+// — ports of the ruby P28::Uos.parse / P28::Document.parse. The ruby
+// tier keeps moxml+leptris; this reader serves the rs core lane.
+// ---------------------------------------------------------------------
+
+/// A parsed element: name, attributes in document order, children,
+/// and the character data of the whole subtree (the ruby node.text).
+#[derive(Debug, Clone)]
+pub struct XNode {
+    pub name: String,
+    pub attrs: Vec<(String, String)>,
+    pub children: Vec<XNode>,
+    text: String,
+}
+
+impl XNode {
+    fn attr(&self, name: &str) -> Option<&str> {
+        self.attrs
+            .iter()
+            .find(|(key, _)| key == name)
+            .map(|(_, value)| value.as_str())
+    }
+
+    /// The ruby node.text: every descendant character data node,
+    /// concatenated in document order.
+    fn text(&self) -> &str {
+        &self.text
+    }
+
+    fn elements(&self) -> impl Iterator<Item = &XNode> {
+        self.children.iter()
+    }
+}
+
+fn decode_entities(text: &str) -> String {
+    if !text.contains('&') {
+        return text.to_string();
+    }
+    let mut out = String::with_capacity(text.len());
+    let bytes = text.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'&' {
+            if let Some(semi) = text[i..].find(';') {
+                let entity = &text[i + 1..i + semi];
+                let replacement = match entity {
+                    "lt" => Some("<".to_string()),
+                    "gt" => Some(">".to_string()),
+                    "amp" => Some("&".to_string()),
+                    "quot" => Some("\"".to_string()),
+                    "apos" => Some("'".to_string()),
+                    other => other
+                        .strip_prefix('#')
+                        .and_then(|digits| {
+                            if let Some(hex) = digits
+                                .strip_prefix('x')
+                                .or_else(|| digits.strip_prefix('X'))
+                            {
+                                u32::from_str_radix(hex, 16).ok()
+                            } else {
+                                digits.parse::<u32>().ok()
+                            }
+                        })
+                        .and_then(char::from_u32)
+                        .map(|c| c.to_string()),
+                };
+                if let Some(text) = replacement {
+                    out.push_str(&text);
+                    i += semi + 1;
+                    continue;
+                }
+            }
+        }
+        let ch = text[i..].chars().next().unwrap_or('&');
+        out.push(ch);
+        i += ch.len_utf8();
+    }
+    out
+}
+
+struct XmlReader<'a> {
+    chars: std::str::CharIndices<'a>,
+    peeked: Option<(usize, char)>,
+    src: &'a str,
+}
+
+impl<'a> XmlReader<'a> {
+    fn new(src: &'a str) -> Self {
+        XmlReader {
+            chars: src.char_indices(),
+            peeked: None,
+            src,
+        }
+    }
+
+    fn next_char(&mut self) -> Option<(usize, char)> {
+        if self.peeked.is_some() {
+            return self.peeked.take();
+        }
+        self.chars.next()
+    }
+
+    fn peek_char(&mut self) -> Option<(usize, char)> {
+        if self.peeked.is_none() {
+            self.peeked = self.chars.next();
+        }
+        self.peeked
+    }
+
+    fn slice(&self, start: usize, end: usize) -> &'a str {
+        &self.src[start..end]
+    }
+
+    fn skip_until(&mut self, needle: &str) {
+        if let Some((start, _)) = self.peek_char() {
+            if let Some(pos) = self.src[start..].find(needle) {
+                let target = start + pos + needle.len();
+                while let Some((i, _)) = self.next_char() {
+                    if i + 1 >= target {
+                        break;
+                    }
+                }
+            } else {
+                for _ in self.by_ref() {}
+            }
+        }
+    }
+}
+
+impl Iterator for XmlReader<'_> {
+    type Item = (usize, char);
+    fn next(&mut self) -> Option<Self::Item> {
+        self.next_char()
+    }
+}
+
+/// The ruby lane reads moxml's LOCAL names — "ep:Node" reads as
+/// "Node". Strip any prefix at parse time.
+fn local_name(raw: &str) -> String {
+    raw.rsplit(':').next().unwrap_or(raw).to_string()
+}
+
+fn parse_xml(source: &str) -> Result<XNode, String> {
+    let mut reader = XmlReader::new(source);
+    let mut stack: Vec<XNode> = Vec::new();
+    let mut root: Option<XNode> = None;
+    let mut text_start: Option<usize> = None;
+    while let Some((pos, ch)) = reader.next_char() {
+        if ch == '<' {
+            if let Some(start) = text_start.take() {
+                let raw = reader.slice(start, pos);
+                let decoded = decode_entities(raw);
+                if !decoded.is_empty() {
+                    if let Some(top) = stack.last_mut() {
+                        top.text.push_str(&decoded);
+                    }
+                }
+            }
+            match reader.peek_char() {
+                Some((_, '!')) if reader.src[pos..].starts_with("<!--") => {
+                    reader.skip_until("-->");
+                }
+                Some((_, '!')) | Some((_, '?')) => reader.skip_until(">"),
+                Some((_, '/')) => {
+                    // closing tag
+                    reader.next_char();
+                    let mut name = String::new();
+                    while let Some((_, c)) = reader.next_char() {
+                        if c == '>' {
+                            break;
+                        }
+                        name.push(c);
+                    }
+                    let name = local_name(name.trim());
+                    let Some(top) = stack.pop() else {
+                        return Err(format!("unexpected closing tag </{name}>"));
+                    };
+                    if top.name != name {
+                        return Err(format!(
+                            "mismatched closing tag </{name}> for <{}>",
+                            top.name
+                        ));
+                    }
+                    if let Some(parent) = stack.last_mut() {
+                        parent.text.push_str(&top.text);
+                        parent.children.push(top);
+                    } else {
+                        root = Some(top);
+                    }
+                }
+                _ => {
+                    // opening tag: read the name
+                    let mut name = String::new();
+                    let mut self_closing = false;
+                    loop {
+                        let Some((_, c)) = reader.next_char() else {
+                            return Err("unterminated tag".to_string());
+                        };
+                        if c == '>' {
+                            break;
+                        }
+                        if c == '/' && reader.peek_char().is_some_and(|(_, nc)| nc == '>') {
+                            self_closing = true;
+                            continue;
+                        }
+                        if name.is_empty() && c.is_whitespace() {
+                            continue;
+                        }
+                        if c.is_whitespace() && !name.is_empty() {
+                            // move to attributes
+                            let attrs = read_attrs(&mut reader)?;
+                            if reader.peek_char().is_some_and(|(_, nc)| nc == '/') {
+                                reader.next_char();
+                                self_closing = true;
+                            }
+                            // consume the closing '>'
+                            loop {
+                                let Some((_, c)) = reader.next_char() else {
+                                    return Err("unterminated tag".to_string());
+                                };
+                                if c == '>' {
+                                    break;
+                                }
+                            }
+                            let node = XNode {
+                                name: local_name(&name),
+                                attrs,
+                                children: Vec::new(),
+                                text: String::new(),
+                            };
+                            if self_closing {
+                                if let Some(parent) = stack.last_mut() {
+                                    parent.children.push(node);
+                                } else {
+                                    root = Some(node);
+                                }
+                            } else {
+                                stack.push(node);
+                            }
+                            name.clear();
+                            break;
+                        }
+                        name.push(c);
+                    }
+                    if !name.is_empty() {
+                        // no attributes: consumed straight to '>'
+                        let node = XNode {
+                            name: local_name(&name),
+                            attrs: Vec::new(),
+                            children: Vec::new(),
+                            text: String::new(),
+                        };
+                        if self_closing {
+                            if let Some(parent) = stack.last_mut() {
+                                parent.children.push(node);
+                            } else {
+                                root = Some(node);
+                            }
+                        } else {
+                            stack.push(node);
+                        }
+                    }
+                    text_start = Some(pos + 1 + name.len());
+                    // text_start fixed up after attr consumption below
+                    if let Some((next_pos, _)) = reader.peek_char() {
+                        text_start = Some(next_pos);
+                    }
+                }
+            }
+        }
+    }
+    match root {
+        Some(root) => Ok(root),
+        None => Err("no root element".to_string()),
+    }
+}
+
+fn read_attrs(reader: &mut XmlReader) -> Result<Vec<(String, String)>, String> {
+    let mut attrs: Vec<(String, String)> = Vec::new();
+    loop {
+        // skip whitespace
+        let Some((_, c)) = reader.peek_char() else {
+            return Err("unterminated tag".to_string());
+        };
+        if c == '>' || c == '/' {
+            return Ok(attrs);
+        }
+        if c.is_whitespace() {
+            reader.next_char();
+            continue;
+        }
+        let mut name = String::new();
+        while let Some((_, ch)) = reader.peek_char() {
+            if ch.is_whitespace() || ch == '=' || ch == '>' || ch == '/' {
+                break;
+            }
+            name.push(ch);
+            reader.next_char();
+        }
+        // skip whitespace before '='
+        while reader.peek_char().is_some_and(|(_, ch)| ch.is_whitespace()) {
+            reader.next_char();
+        }
+        if reader.peek_char().is_some_and(|(_, ch)| ch == '=') {
+            reader.next_char();
+            while reader.peek_char().is_some_and(|(_, ch)| ch.is_whitespace()) {
+                reader.next_char();
+            }
+            let Some((_, quote)) = reader.next_char() else {
+                return Err("unterminated attribute".to_string());
+            };
+            if quote != '"' && quote != '\'' {
+                return Err("unquoted attribute value".to_string());
+            }
+            let mut value = String::new();
+            loop {
+                let Some((_, ch)) = reader.next_char() else {
+                    return Err("unterminated attribute value".to_string());
+                };
+                if ch == quote {
+                    break;
+                }
+                value.push(ch);
+            }
+            attrs.push((name, decode_entities(&value)));
+        } else {
+            attrs.push((name, String::new()));
+        }
+    }
+}
+
+/// The ruby value kinds (the writer's encodings inverted).
+#[derive(Clone, Copy, PartialEq)]
+enum ValueKind {
+    Boolean,
+    Logical,
+    Enumeration,
+    Binary,
+    Number,
+    List,
+    String,
+}
+
+const BUILTIN_KINDS: &[(&str, ValueKind)] = &[
+    ("binary", ValueKind::Binary),
+    ("boolean", ValueKind::Boolean),
+    ("logical", ValueKind::Logical),
+    ("integer", ValueKind::Number),
+    ("real", ValueKind::Number),
+    ("number", ValueKind::Number),
+    ("string", ValueKind::String),
+];
+
+fn perr<T>(message: impl Into<String>) -> Result<T, String> {
+    Err(message.into())
+}
+
+/// A declaration's declared type kind (the ruby value_kind +
+/// resolve_defined_type over the schema wire).
+fn value_kind(schema: &Value, declaration: Option<&Value>) -> Result<ValueKind, String> {
+    let type_node = declaration.and_then(|d| d.get("type"));
+    let Some(type_node) = type_node else {
+        return Ok(ValueKind::String);
+    };
+    let class = type_node
+        .get("_class")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let kind = match class {
+        "Expressir::Model::DataTypes::Boolean" => ValueKind::Boolean,
+        "Expressir::Model::DataTypes::Logical" => ValueKind::Logical,
+        "Expressir::Model::DataTypes::Binary" => ValueKind::Binary,
+        "Expressir::Model::DataTypes::Enumeration" => ValueKind::Enumeration,
+        "Expressir::Model::DataTypes::Integer"
+        | "Expressir::Model::DataTypes::Real"
+        | "Expressir::Model::DataTypes::Number" => ValueKind::Number,
+        _ => {
+            if type_node.get("base_type").is_some_and(|b| !b.is_null()) {
+                ValueKind::List
+            } else {
+                resolve_defined_type(schema, type_node, 0)?.unwrap_or(ValueKind::String)
+            }
+        }
+    };
+    Ok(kind)
+}
+
+/// A defined TYPE's underlying kind; depth-guarded against cycles.
+fn resolve_defined_type(
+    schema: &Value,
+    type_node: &Value,
+    depth: usize,
+) -> Result<Option<ValueKind>, String> {
+    if depth > 32 {
+        return Ok(None);
+    }
+    let class = type_node
+        .get("_class")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    match class {
+        "Expressir::Model::DataTypes::Enumeration" => Ok(Some(ValueKind::Enumeration)),
+        "Expressir::Model::References::SimpleReference" => {
+            let id = base_id_of(type_node).unwrap_or_default();
+            let downcased = id.to_lowercase();
+            if let Some((_, kind)) = BUILTIN_KINDS.iter().find(|(name, _)| *name == downcased) {
+                return Ok(Some(*kind));
+            }
+            let decl = schema
+                .get("types")
+                .and_then(Value::as_array)
+                .and_then(|types| {
+                    types.iter().find(|t| {
+                        t.get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|tid| tid.to_lowercase() == downcased)
+                    })
+                });
+            match decl.and_then(|d| d.get("underlying_type")) {
+                Some(underlying) if !underlying.is_null() => {
+                    resolve_defined_type(schema, underlying, depth + 1)
+                }
+                _ => Ok(None),
+            }
+        }
+        _ => Ok(None),
+    }
+}
+
+fn base_id_of(type_node: &Value) -> Option<&str> {
+    if let Some(base_path) = type_node.get("base_path").and_then(Value::as_str) {
+        return base_path.split('.').next_back();
+    }
+    type_node.get("id").and_then(Value::as_str)
+}
+
+/// Direct or inherited explicit Attribute declaration by name.
+fn find_attribute_decl<'a>(
+    schema_index: &SchemaIndex,
+    schema: &'a Value,
+    entity_id: &str,
+    name: &str,
+) -> Option<&'a Value> {
+    let key = name.to_lowercase();
+    let mut chain: Vec<String> = schema_index
+        .closure(entity_id)
+        .iter()
+        .map(|info| info.id.clone())
+        .collect();
+    chain.push(entity_id.to_string());
+    for id in chain {
+        let Some(entity) = schema
+            .get("entities")
+            .and_then(Value::as_array)
+            .and_then(|entities| {
+                entities.iter().find(|e| {
+                    e.get("id")
+                        .and_then(Value::as_str)
+                        .is_some_and(|eid| eid.to_lowercase() == id.to_lowercase())
+                })
+            })
+        else {
+            continue;
+        };
+        let found = entity
+            .get("attributes")
+            .and_then(Value::as_array)
+            .and_then(|attrs| {
+                attrs.iter().find(|attr| {
+                    attr.get("_class").and_then(Value::as_str)
+                        == Some("Expressir::Model::Declarations::Attribute")
+                        && attr
+                            .get("id")
+                            .and_then(Value::as_str)
+                            .is_some_and(|aid| aid.to_lowercase() == key)
+                })
+            });
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+fn numeric_text(text: &str) -> Value {
+    if text.chars().all(|c| c.is_ascii_digit() || c == '-') && text.matches('-').count() <= 1 {
+        if let Ok(value) = text.parse::<i64>() {
+            return serde_json::json!({ "number": value.to_string() });
+        }
+    }
+    serde_json::json!({ "number": text })
+}
+
+/// The ruby logical_item: the P21 rendering of a logical face.
+fn logical_item(text: &str, allowed: &[&str]) -> Result<String, String> {
+    let item = match text {
+        "true" => "T",
+        "false" => "F",
+        "unknown" => "UNKNOWN",
+        _ => "",
+    };
+    if allowed.contains(&item) {
+        Ok(item.to_string())
+    } else {
+        perr(format!("invalid logical value '{text}'"))
+    }
+}
+
+/// The ruby split_list: whitespace LIST text into encoded components.
+fn split_list(schema: &Value, declaration: Option<&Value>, text: &str) -> Result<Value, String> {
+    if text.is_empty() {
+        return Ok(serde_json::json!({ "list": [] }));
+    }
+    let base = declaration
+        .and_then(|d| d.get("type"))
+        .and_then(|t| t.get("base_type"));
+    let kind = match base {
+        Some(base) if !base.is_null() => {
+            resolve_defined_type(schema, base, 0)?.unwrap_or(ValueKind::String)
+        }
+        _ => ValueKind::String,
+    };
+    let items: Vec<Value> = text
+        .split_whitespace()
+        .map(|item| match kind {
+            ValueKind::Enumeration => serde_json::json!({ "enum": item }),
+            ValueKind::Number => numeric_text(item),
+            _ => serde_json::json!(item),
+        })
+        .collect();
+    Ok(serde_json::json!({ "list": items }))
+}
+
+/// The inverse of the writer's value encodings (the ruby
+/// attribute_value) — gate param encoding out.
+fn attribute_value(
+    schema: &Value,
+    schema_index: &SchemaIndex,
+    entity_id: &str,
+    slot_name: &str,
+    accessor: &XNode,
+) -> Result<Value, String> {
+    let declaration = find_attribute_decl(schema_index, schema, entity_id, slot_name);
+    let components: Vec<&XNode> = accessor.elements().collect();
+    if !components.is_empty() {
+        let mut refs: Vec<Value> = Vec::new();
+        for component in components {
+            let Some(r) = component.attr("ref") else {
+                return perr(format!("component '{}' has no ref", component.name));
+            };
+            refs.push(serde_json::json!(format!(
+                "#{}",
+                r.trim_start_matches("id")
+            )));
+        }
+        return Ok(serde_json::json!({ "list": refs }));
+    }
+    if let Some(r) = accessor.attr("ref") {
+        return Ok(serde_json::json!(format!(
+            "#{}",
+            r.trim_start_matches("id")
+        )));
+    }
+    let text = accessor.text();
+    match value_kind(schema, declaration)? {
+        ValueKind::Boolean => Ok(serde_json::json!({
+            "enum": logical_item(text, &["T", "F"])?
+        })),
+        ValueKind::Logical => Ok(serde_json::json!({
+            "enum": logical_item(text, &["T", "F", "UNKNOWN"])?
+        })),
+        ValueKind::Enumeration => Ok(serde_json::json!({ "enum": text })),
+        ValueKind::Binary => Ok(serde_json::json!({ "binary": text })),
+        ValueKind::Number => Ok(numeric_text(text)),
+        ValueKind::List => split_list(schema, declaration, text),
+        ValueKind::String => Ok(serde_json::json!(text)),
+    }
+}
+
+/// The ruby Uos.parse: a uos document over a schema wire in, the
+/// gate population encoding out.
+pub fn uos_parse_json(xml: &str, schema_json: &str) -> Result<String, String> {
+    let schema: Value =
+        serde_json::from_str(schema_json).map_err(|e| format!("schema json: {e}"))?;
+    let population = uos_parse(xml, &schema)?;
+    serde_json::to_string(&population).map_err(|e| format!("population json: {e}"))
+}
+
+fn uos_parse(xml: &str, schema: &Value) -> Result<Value, String> {
+    let doc = parse_xml(xml)?;
+    if doc.name != "uos" {
+        return perr(format!("not a uos document (root '{}')", doc.name));
+    }
+    let schema_index = SchemaIndex::new(schema);
+    let schema_name = schema.get("id").and_then(Value::as_str).unwrap_or("");
+    let mut instances: Vec<Value> = Vec::new();
+    for node in doc.elements() {
+        let pid = instance_pid(node)?;
+        let record = if node.name == "complexEntity" {
+            let mut parts: Vec<Value> = Vec::new();
+            for role in node.elements() {
+                parts.push(role_record(schema, &schema_index, schema_name, role)?);
+            }
+            serde_json::json!({ "records": parts })
+        } else {
+            serde_json::json!({ "records": [role_record(schema, &schema_index, schema_name, node)?] })
+        };
+        instances.push(serde_json::json!({ "id": pid, "records": record["records"] }));
+    }
+    Ok(serde_json::json!({ "instances": instances }))
+}
+
+fn instance_pid(node: &XNode) -> Result<u64, String> {
+    let Some(id) = node.attr("id") else {
+        return perr(format!("instance element '{}' has no id", node.name));
+    };
+    let digits = id.trim_start_matches("id");
+    digits
+        .parse::<u64>()
+        .map_err(|_| format!("instance element '{}' has no id", node.name))
+}
+
+fn role_record(
+    schema: &Value,
+    schema_index: &SchemaIndex,
+    schema_name: &str,
+    node: &XNode,
+) -> Result<Value, String> {
+    let Some(entity_id) = schema_index
+        .entities
+        .keys()
+        .find(|id| id.as_str() == node.name.to_lowercase())
+        .cloned()
+    else {
+        return perr(format!(
+            "element '{}' does not match any entity of schema '{}'",
+            node.name, schema_name
+        ));
+    };
+    let entity = schema
+        .get("entities")
+        .and_then(Value::as_array)
+        .and_then(|entities| {
+            entities.iter().find(|e| {
+                e.get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id.to_lowercase() == entity_id)
+            })
+        })
+        .cloned()
+        .unwrap_or(Value::Null);
+    let keyword = entity
+        .get("id")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_uppercase();
+    let slots = schema_index.slots(&entity_id);
+    let mut mapped: std::collections::BTreeMap<usize, Value> = std::collections::BTreeMap::new();
+    for accessor in node.elements() {
+        let slot_name = accessor.name.to_lowercase();
+        let Some(index) = slots.iter().position(|slot| *slot == slot_name) else {
+            return perr(format!(
+                "entity '{}' has no attribute '{}'",
+                keyword, accessor.name
+            ));
+        };
+        mapped.insert(
+            index,
+            attribute_value(schema, schema_index, &entity_id, &slot_name, accessor)?,
+        );
+    }
+    let mut params: Vec<Value> = Vec::with_capacity(slots.len());
+    for i in 0..slots.len() {
+        params.push(mapped.remove(&i).unwrap_or(serde_json::json!("unset")));
+    }
+    Ok(serde_json::json!({ "keyword": keyword, "params": params }))
+}
+
+/// The ruby Document.parse: an iso_10303_28 envelope in, the express
+/// elements + parsed schemas + per-uos populations out.
+pub fn document_parse_json(xml: &str) -> Result<String, String> {
+    let doc = parse_xml(xml)?;
+    if doc.name != "iso_10303_28" {
+        return perr(format!(
+            "not an iso_10303_28 document (root '{}')",
+            doc.name
+        ));
+    }
+    let mut express: Vec<Value> = Vec::new();
+    let mut schemas: serde_json::Map<String, Value> = serde_json::Map::new();
+    for node in doc.elements() {
+        if node.name != "express" {
+            continue;
+        }
+        let element = serde_json::json!({
+            "id": node.attr("id").unwrap_or_default(),
+            "schema_name": node.attr("schema_name").unwrap_or_default(),
+            "source": node.text(),
+        });
+        let source = node.text();
+        let tree = crate::ParsedTree::parse(source)
+            .map_err(|e| format!("express source parse failed: {e:?}"))?;
+        let wire = tree
+            .to_model_json("p28.express")
+            .map_err(|e| format!("express wire failed: {e:?}"))?;
+        let schema = wire
+            .get("schemas")
+            .and_then(Value::as_array)
+            .and_then(|s| s.first())
+            .cloned()
+            .unwrap_or(Value::Null);
+        schemas.insert(node.attr("id").unwrap_or_default().to_string(), schema);
+        express.push(element);
+    }
+    let mut units: serde_json::Map<String, Value> = serde_json::Map::new();
+    for node in doc.elements() {
+        if node.name != "uos" {
+            continue;
+        }
+        let id = node.attr("schema").unwrap_or_default().to_string();
+        let Some(schema) = schemas.get(&id) else {
+            return perr(format!("uos references unknown express id '{id}'"));
+        };
+        let population = uos_parse(&serialize_node(node), schema)?;
+        units.insert(id, population);
+    }
+    let out = serde_json::json!({
+        "express": express,
+        "units": Value::Object(units),
+    });
+    serde_json::to_string(&out).map_err(|e| format!("result json: {e}"))
+}
+
+/// Re-serialize a parsed uos element back to XML text (the ruby
+/// node.to_xml handoff into Uos.parse).
+fn serialize_node(node: &XNode) -> String {
+    fn write(node: &XNode, out: &mut String) {
+        out.push('<');
+        out.push_str(&node.name);
+        for (key, value) in &node.attrs {
+            out.push(' ');
+            out.push_str(key);
+            out.push_str("=\"");
+            for ch in value.chars() {
+                match ch {
+                    '&' => out.push_str("&amp;"),
+                    '<' => out.push_str("&lt;"),
+                    '>' => out.push_str("&gt;"),
+                    '"' => out.push_str("&quot;"),
+                    _ => out.push(ch),
+                }
+            }
+            out.push('"');
+        }
+        if node.children.is_empty() && node.text.is_empty() {
+            out.push_str("/>");
+            return;
+        }
+        out.push('>');
+        out.push_str(&node.text);
+        for child in &node.children {
+            write(child, out);
+        }
+        out.push_str(&format!("</{}>", node.name));
+    }
+    let mut out = String::new();
+    write(node, &mut out);
+    out
+}
