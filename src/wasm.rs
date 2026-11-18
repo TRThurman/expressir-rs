@@ -359,7 +359,7 @@ mod bindings {
 
     #[wasm_bindgen]
     pub fn population_wire_json(source: String) -> Result<String, String> {
-        super::population_json(source)
+        super::population_wire_json(source)
     }
 
     #[wasm_bindgen]
