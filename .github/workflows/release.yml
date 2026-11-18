@@ -71,12 +71,16 @@ jobs:
         uses: actions/checkout@v4
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
-      # cargo >= 1.88 exchanges the Actions OIDC token for a crates.io
-      # publish token when the registered trusted publisher matches
-      # (owner lutaml, repo expressir-rs, workflow release.yml) — no
-      # registry secret exists (#619).
+      # The documented crates.io trusted-publishing exchange: the
+      # action swaps the Actions OIDC claim for a short-lived publish
+      # token when the registered trusted publisher matches (owner
+      # lutaml, repo expressir-rs, workflow release.yml) — no registry
+      # secret exists (#619).
+      - name: Exchange the OIDC claim for a crates.io token
+        uses: rust-lang/crates-io-auth-action@v1
+        id: auth
       - name: Publish
-        run: cargo publish
+        run: cargo publish --token ${{ steps.auth.outputs.token }}
 
   binaries:
     name: Release binaries (${{ matrix.target }})
