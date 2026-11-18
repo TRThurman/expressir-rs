@@ -9,6 +9,10 @@
 
 [workspace]
 dependencies_update = true
+# crates.io trusted publishing: release-plz claims the OIDC identity
+# registered on crates.io (lutaml/expressir-rs @ release.yml) — no
+# CARGO_REGISTRY_TOKEN secret exists (#619).
+trusted_publishing = "oidc"
 # The house style (grammar:, tests:, docs:, model_json:) is not
 # conventional-commit typed, so bump-triggering commits are rare;
 # without this, grammar regens silently queue up unreleased.

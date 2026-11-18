@@ -41,6 +41,8 @@ jobs:
     name: Release-plz
     needs: parity-gate
     runs-on: ubuntu-latest
+    permissions:
+      id-token: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -58,7 +60,6 @@ jobs:
         uses: MarcoIeni/release-plz-action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
   binaries:
     name: Release binaries (${{ matrix.target }})
