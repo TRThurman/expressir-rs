@@ -21,6 +21,7 @@ pub mod extract;
 pub mod ffi;
 pub mod format_len;
 pub mod formatter;
+pub mod interop;
 pub mod lsp;
 pub mod model;
 pub mod model_json;
