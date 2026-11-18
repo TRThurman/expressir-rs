@@ -24,6 +24,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   parity-gate:
@@ -52,14 +53,30 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
-      # crates.io trusted publishing: the OIDC token claims the
-      # registered publisher (owner, workflow, environment). Requires
-      # `cargo login`-less publishing — the one-time registration on
-      # crates.io replaces the CARGO_REGISTRY_TOKEN secret (#619).
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  publish-crate:
+    name: Publish the crate (crates.io trusted publishing)
+    needs: parity-gate
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+      # cargo >= 1.88 exchanges the Actions OIDC token for a crates.io
+      # publish token when the registered trusted publisher matches
+      # (owner lutaml, repo expressir-rs, workflow release.yml) — no
+      # registry secret exists (#619).
+      - name: Publish
+        run: cargo publish
 
   binaries:
     name: Release binaries (${{ matrix.target }})
