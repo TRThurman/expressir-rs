@@ -53,10 +53,14 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      # release-plz needs PR-write (the GITHUB_TOKEN is
+      # read-scoped on this repo — the 403 on pulls API); the
+      # LUTAML_CI_PAT_TOKEN secret carries the token, matching the
+      # other lutaml trains.
       - name: Run release-plz
         uses: MarcoIeni/release-plz-action@v0.5
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.LUTAML_CI_PAT_TOKEN }}
 
   publish-crate:
     name: Publish the crate (crates.io trusted publishing)
