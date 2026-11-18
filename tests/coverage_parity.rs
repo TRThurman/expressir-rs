@@ -144,12 +144,12 @@ fn ruby_reports(expressir_dir: &Path, sources: &BTreeMap<String, String>) -> Res
 }
 
 fn attached_wire(source: &str) -> Result<Value, String> {
-    let tree = expressir_rs::ParsedTree::parse(source).map_err(|e| format!("parse: {e}"))?;
+    let tree = expressir::ParsedTree::parse(source).map_err(|e| format!("parse: {e}"))?;
     let mut wire = tree
         .to_model_json("parity.exp")
         .map_err(|e| format!("wire: {e:?}"))?;
-    expressir_rs::attach::attach_tagged_remarks(&mut wire, source, false);
-    expressir_rs::attach::attach_untagged_remarks(&mut wire, source, false);
+    expressir::attach::attach_tagged_remarks(&mut wire, source, false);
+    expressir::attach::attach_untagged_remarks(&mut wire, source, false);
     Ok(wire)
 }
 
@@ -218,7 +218,7 @@ fn coverage_engine_matches_the_ruby_engine_over_the_corpus() {
 
         for (variant, skips) in VARIANTS {
             let skips: Vec<String> = skips.iter().map(|s| s.to_string()).collect();
-            let rs = expressir_rs::coverage::coverage(wire, &skips);
+            let rs = expressir::coverage::coverage(wire, &skips);
             let Some(ruby_schemas) = entry["variants"][variant].as_array() else {
                 failures.push(format!("{key}/{variant}: ruby schemas missing"));
                 continue;

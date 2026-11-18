@@ -1,4 +1,4 @@
-# Release-plz configuration for expressir-rs
+# Release-plz configuration for the expressir crate (repository: expressir-rs)
 #
 # Automated versioning, changelog generation, and crates.io publishing on
 # every push to main (expressir#619): the crate is consumed by expressir's

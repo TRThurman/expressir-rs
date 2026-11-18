@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use expressir_rs::ParsedTree;
+use expressir::ParsedTree;
 use parsanol::portable::{AstArena, PortableParser};
 
 fn main() {
@@ -20,7 +20,7 @@ fn main() {
         .and_then(|s| s.parse().ok())
         .unwrap_or(3);
 
-    let grammar = expressir_rs::grammar().clone();
+    let grammar = expressir::grammar().clone();
 
     let mut parse_t = f64::MAX;
     let mut full_t = f64::MAX;

@@ -135,7 +135,7 @@ fn ruby_lanes(
 
 fn schema_wire_of(path: &Path, name: &str) -> Value {
     let source = std::fs::read_to_string(path).expect("fixture readable");
-    let tree = expressir_rs::ParsedTree::parse(&source)
+    let tree = expressir::ParsedTree::parse(&source)
         .unwrap_or_else(|e| panic!("rs lane parses {name}: {e:?}"));
     let wire = tree
         .to_model_json(name)
@@ -197,11 +197,9 @@ fn p28_reader_parity() {
         if let Some(message) = expected.get("error").and_then(Value::as_str) {
             let actual_error = match (uos, document) {
                 (Some(uos), _) => {
-                    expressir_rs::p28::uos_parse_json(uos, &schema.to_string()).unwrap_err()
+                    expressir::p28::uos_parse_json(uos, &schema.to_string()).unwrap_err()
                 }
-                (_, Some(document)) => {
-                    expressir_rs::p28::document_parse_json(document).unwrap_err()
-                }
+                (_, Some(document)) => expressir::p28::document_parse_json(document).unwrap_err(),
                 _ => continue,
             };
             if actual_error != message {
@@ -214,14 +212,14 @@ fn p28_reader_parity() {
         let (expected, actual): (Value, Value) = match (uos, document) {
             (Some(uos), _) => (
                 expected.get("uos").cloned().unwrap_or(Value::Null),
-                match expressir_rs::p28::uos_parse_json(uos, &schema.to_string()) {
+                match expressir::p28::uos_parse_json(uos, &schema.to_string()) {
                     Ok(text) => serde_json::from_str(&text).expect("population json"),
                     Err(message) => json!({ "error": message }),
                 },
             ),
             (_, Some(document)) => (
                 expected.clone(),
-                match expressir_rs::p28::document_parse_json(document) {
+                match expressir::p28::document_parse_json(document) {
                     Ok(text) => serde_json::from_str(&text).expect("document json"),
                     Err(message) => json!({ "error": message }),
                 },

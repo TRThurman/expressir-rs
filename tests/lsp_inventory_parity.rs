@@ -166,7 +166,7 @@ fn lsp_inventory_matches_the_ruby_walks_over_the_corpus() {
             continue;
         }
         let inventory: Value = match serde_json::from_str(
-            &expressir_rs::lsp::inventory_json(source).expect("rs inventory"),
+            &expressir::lsp::inventory_json(source).expect("rs inventory"),
         ) {
             Ok(inventory) => inventory,
             Err(e) => {

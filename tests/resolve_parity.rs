@@ -236,7 +236,7 @@ fn resolved_wires_match_the_ruby_resolve_over_the_corpus() {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => continue,
         };
@@ -250,7 +250,7 @@ fn resolved_wires_match_the_ruby_resolve_over_the_corpus() {
         if let Some(obj) = wire.as_object_mut() {
             obj.remove("path");
         }
-        expressir_rs::checker::resolve_references(&mut wire);
+        expressir::checker::resolve_references(&mut wire);
         sources.insert(key.clone(), source);
         parsed.push((key, wire));
     }

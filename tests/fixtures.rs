@@ -2,7 +2,7 @@
 //! match the expected JSON generated from the real Expressir model
 //! (`generate/expected_model.rb`).
 
-use expressir_rs::ParsedTree;
+use expressir::ParsedTree;
 use serde_json::Value;
 
 fn check(name: &str) {

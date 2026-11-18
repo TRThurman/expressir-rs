@@ -33,7 +33,7 @@ fn wire_of(path: &str) -> Result<serde_json::Value, String> {
     let source = read_input(path)?;
     let key = if path == "-" { "stdin.exp" } else { path };
     let tree =
-        expressir_rs::ParsedTree::parse(&source).map_err(|e| format!("parse failed at {e:?}"))?;
+        expressir::ParsedTree::parse(&source).map_err(|e| format!("parse failed at {e:?}"))?;
     tree.to_model_json(key)
         .map_err(|e| format!("wire failed: {e:?}"))
 }
@@ -52,11 +52,11 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         "format" => {
             let wire = wire_of(input_path(rest, 0)?)?;
-            Ok(expressir_rs::formatter::format(&wire, false))
+            Ok(expressir::formatter::format(&wire, false))
         }
         "format-stripped" => {
             let wire = wire_of(input_path(rest, 0)?)?;
-            Ok(expressir_rs::formatter::format(&wire, true))
+            Ok(expressir::formatter::format(&wire, true))
         }
         "check" => {
             let mut wire = wire_of(input_path(rest, 0)?)?;
@@ -64,7 +64,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 .get(1)
                 .filter(|d| !d.starts_with('-'))
                 .map(String::as_str);
-            let notes = expressir_rs::checker::check(&mut wire, dialect);
+            let notes = expressir::checker::check(&mut wire, dialect);
             let rows: Vec<serde_json::Value> = notes
                 .iter()
                 .map(|note| {
@@ -80,31 +80,31 @@ fn run(args: &[String]) -> Result<String, String> {
         }
         "resolve" => {
             let mut wire = wire_of(input_path(rest, 0)?)?;
-            let fills = expressir_rs::checker::resolve_references(&mut wire);
+            let fills = expressir::checker::resolve_references(&mut wire);
             let mut wire = wire;
             wire["_gate_fills"] = serde_json::json!(fills);
             serde_json::to_string(&wire).map_err(|e| format!("json: {e}"))
         }
         "lsp-symbols" => {
             let source = read_input(input_path(rest, 0)?)?;
-            expressir_rs::lsp::symbols_json(&source)
+            expressir::lsp::symbols_json(&source)
         }
         "lsp-inventory" => {
             let source = read_input(input_path(rest, 0)?)?;
-            expressir_rs::lsp::inventory_json(&source)
+            expressir::lsp::inventory_json(&source)
         }
         "p21-parse" => {
             let source = read_input(input_path(rest, 0)?)?;
-            let population = expressir_rs::population::parse_full_population(&source)?;
-            serde_json::to_string(&expressir_rs::population::population_to_json_value(
+            let population = expressir::population::parse_full_population(&source)?;
+            serde_json::to_string(&expressir::population::population_to_json_value(
                 &population,
             ))
             .map_err(|e| format!("json: {e}"))
         }
         "p21-write" => {
             let source = read_input(input_path(rest, 0)?)?;
-            let population = expressir_rs::population::parse_full_population(&source)?;
-            Ok(expressir_rs::population::write_population(&population))
+            let population = expressir::population::parse_full_population(&source)?;
+            Ok(expressir::population::write_population(&population))
         }
         "owl" => {
             let wire = wire_of(input_path(rest, 0)?)?;
@@ -114,7 +114,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 .and_then(|s| s.first())
                 .cloned()
                 .ok_or("no schema in the wire")?;
-            expressir_rs::interop::owl_json(&schema.to_string(), "")
+            expressir::interop::owl_json(&schema.to_string(), "")
         }
         "json-schema" => {
             let wire = wire_of(input_path(rest, 0)?)?;
@@ -124,7 +124,7 @@ fn run(args: &[String]) -> Result<String, String> {
                 .and_then(|s| s.first())
                 .cloned()
                 .ok_or("no schema in the wire")?;
-            expressir_rs::interop::json_schema_json(&schema.to_string())
+            expressir::interop::json_schema_json(&schema.to_string())
         }
         other => Err(format!("unknown command '{other}' — run `expressir help`")),
     }

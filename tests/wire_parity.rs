@@ -239,7 +239,7 @@ fn rs_wire_matches_the_ruby_parse_over_the_corpus() {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => continue,
         };

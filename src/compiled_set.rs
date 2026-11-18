@@ -19,7 +19,7 @@ pub const FORMAT_VERSION: u32 = 1;
 pub struct CompiledSetHeader {
     pub magic: [u8; 6],
     pub format_version: u32,
-    pub expressir_rs_version: String,
+    pub expressir_version: String,
     pub grammar_digest: String,
     pub set_digest: String,
 }
@@ -73,11 +73,7 @@ pub fn set_digest(files: &[(String, String)]) -> String {
 
 impl CompiledSet {
     /// Build a set from compiled entries, stamping header digests.
-    pub fn build(
-        files: Vec<CompiledFile>,
-        expressir_rs_version: &str,
-        grammar_digest: &str,
-    ) -> Self {
+    pub fn build(files: Vec<CompiledFile>, expressir_version: &str, grammar_digest: &str) -> Self {
         let pairs: Vec<(String, String)> = files
             .iter()
             .map(|f| (f.wire_path.clone(), f.source_sha.clone()))
@@ -86,7 +82,7 @@ impl CompiledSet {
             header: CompiledSetHeader {
                 magic: *MAGIC,
                 format_version: FORMAT_VERSION,
-                expressir_rs_version: expressir_rs_version.to_string(),
+                expressir_version: expressir_version.to_string(),
                 grammar_digest: grammar_digest.to_string(),
                 set_digest: set_digest(&pairs),
             },

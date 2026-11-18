@@ -54,7 +54,7 @@ fn expressir_dir() -> Option<PathBuf> {
 
 fn wire_of(path: &Path, name: &str) -> Value {
     let source = std::fs::read_to_string(path).expect("fixture readable");
-    let tree = expressir_rs::ParsedTree::parse(&source)
+    let tree = expressir::ParsedTree::parse(&source)
         .unwrap_or_else(|e| panic!("rs lane parses {name}: {e:?}"));
     let wire = tree
         .to_model_json(name)
@@ -133,7 +133,7 @@ fn schema_compare_parity() {
     );
 
     let row = &ruby["gate"];
-    let rs_deltas_raw = expressir_rs::schema_compare::compare(&base, &revised);
+    let rs_deltas_raw = expressir::schema_compare::compare(&base, &revised);
 
     let ruby_deltas = &row["deltas"];
     // Node payloads: ruby to_hash vs the rs wire — the wire gate's
@@ -206,7 +206,7 @@ fn schema_compare_parity() {
     // Patch: both lanes' patched schemas must equal the revised
     // signature (the ruby PATCHED signature, normalized, is the
     // oracle for the wire shape too).
-    let rs_patched = expressir_rs::schema_compare::patch(&base, &rs_deltas_raw);
+    let rs_patched = expressir::schema_compare::patch(&base, &rs_deltas_raw);
     let patched_normalized = normalize(&row["patched_signature"]);
     let revised_normalized = normalize(&row["revised_signature"]);
     if normalize(&rs_patched) != patched_normalized {

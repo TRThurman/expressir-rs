@@ -3,7 +3,7 @@
 //! parity spec (`parser_core_parity_spec`) holds across both parse
 //! paths.
 
-use expressir_rs::ParsedTree;
+use expressir::ParsedTree;
 use serde_json::Value;
 
 fn wire(source: &str) -> Value {

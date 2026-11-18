@@ -1,5 +1,5 @@
 [package]
-name = "expressir-rs"
+name = "expressir"
 version = "0.1.35"
 edition = "2021"
 rust-version = "1.86"
@@ -19,7 +19,7 @@ serde_json = { version = "1.0", features = ["preserve_order"] }
 regex = "1"
 
 [lib]
-name = "expressir_rs"
+name = "expressir"
 crate-type = ["cdylib", "rlib"]
 
 [profile.release]

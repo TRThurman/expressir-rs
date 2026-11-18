@@ -181,7 +181,7 @@ fn uos_emit_matches_the_ruby_writer_byte_for_byte() {
             continue;
         }
         let options = serde_json::to_string(&entry["options"]).expect("options");
-        let rs_xml = expressir_rs::p28::uos_xml_json(
+        let rs_xml = expressir::p28::uos_xml_json(
             &serde_json::to_string(&entry["population_wire"]).expect("population wire"),
             &serde_json::to_string(&entry["schema_wire"]).expect("schema wire"),
             &options,

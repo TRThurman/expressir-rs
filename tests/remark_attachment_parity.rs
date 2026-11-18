@@ -271,7 +271,7 @@ fn rust_summary(wire: &Value) -> Value {
             }
             return;
         }
-        for key in expressir_rs::attach::collection_registry(suffix_full) {
+        for key in expressir::attach::collection_registry(suffix_full) {
             if let Some(Value::Array(items)) = map.get(*key) {
                 for item in items {
                     walk(item, out);
@@ -303,7 +303,7 @@ fn attachment_matches_ruby_over_the_corpus() {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => {
                 eprintln!("skip (rust lane cannot parse): {key}");
@@ -315,8 +315,8 @@ fn attachment_matches_ruby_over_the_corpus() {
             Err(_) => continue,
         };
         let mut attached = wire.clone();
-        expressir_rs::attach::attach_tagged_remarks(&mut attached, &source, false);
-        expressir_rs::attach::attach_untagged_remarks(&mut attached, &source, false);
+        expressir::attach::attach_tagged_remarks(&mut attached, &source, false);
+        expressir::attach::attach_untagged_remarks(&mut attached, &source, false);
         wires.insert(key.clone(), wire);
         rust_attached.insert(key, rust_summary(&attached));
     }

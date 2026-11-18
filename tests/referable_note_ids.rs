@@ -5,12 +5,12 @@
 use serde_json::Value;
 
 fn attached(source: &str) -> Value {
-    let mut wire = expressir_rs::ParsedTree::parse(source)
+    let mut wire = expressir::ParsedTree::parse(source)
         .expect("parses")
         .to_model_json("s.exp")
         .expect("wire");
-    expressir_rs::attach::attach_tagged_remarks(&mut wire, source, false);
-    expressir_rs::attach::attach_untagged_remarks(&mut wire, source, false);
+    expressir::attach::attach_tagged_remarks(&mut wire, source, false);
+    expressir::attach::attach_untagged_remarks(&mut wire, source, false);
     wire
 }
 
@@ -32,7 +32,7 @@ const WHERE_NOTE: &str = "SCHEMA s;\nENTITY w;\n  size : INTEGER;\nWHERE\n  WR1:
 #[test]
 fn where_rule_note_formats_with_a_tag_that_reattaches_to_the_rule() {
     let wire = attached(WHERE_NOTE);
-    let formatted = expressir_rs::formatter::format(&wire, false);
+    let formatted = expressir::formatter::format(&wire, false);
     assert!(
         formatted.contains("--\"s.w.WR1.__note:n1\" rule note"),
         "{formatted}"

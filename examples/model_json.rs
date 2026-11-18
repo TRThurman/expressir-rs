@@ -12,7 +12,7 @@ fn main() {
     let out_path = args.next();
 
     let source = std::fs::read_to_string(&file).expect("read input");
-    let tree = expressir_rs::ParsedTree::parse(&source).expect("parse");
+    let tree = expressir::ParsedTree::parse(&source).expect("parse");
     let value = tree.to_model_json(&rel_path).expect("model json");
     let rendered = serde_json::to_string_pretty(&value).expect("render");
 

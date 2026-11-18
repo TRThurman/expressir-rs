@@ -5,13 +5,13 @@ fn main() {
         serde_json::from_str(&std::fs::read_to_string(&wire_path).unwrap()).unwrap()
     } else {
         let source = std::fs::read_to_string(&path).unwrap();
-        let tree = expressir_rs::ParsedTree::parse(&source).unwrap();
+        let tree = expressir::ParsedTree::parse(&source).unwrap();
         tree.to_model_json(&path).unwrap()
     };
     if let Ok(spec) = std::env::var("CHECKER_DUMP_EXPANSION") {
         let (idx, k) = spec.split_once(':').unwrap();
         let out =
-            expressir_rs::checker::debug_expansion(&wire, idx.parse().unwrap(), k.parse().unwrap());
+            expressir::checker::debug_expansion(&wire, idx.parse().unwrap(), k.parse().unwrap());
         println!(
             "expansion n={} has_representation={}",
             out.len(),
@@ -24,7 +24,7 @@ fn main() {
     }
     if let Ok(spec) = std::env::var("CHECKER_DUMP_CHILDREN") {
         let idx: usize = spec.parse().unwrap();
-        let ids = expressir_rs::checker::debug_children(&wire, idx);
+        let ids = expressir::checker::debug_children(&wire, idx);
         println!(
             "children n={} has_representation={}",
             ids.len(),
@@ -47,13 +47,13 @@ fn main() {
         } else {
             Some(dialect.as_str())
         };
-        let notes = expressir_rs::checker::check(&mut w2, d);
+        let notes = expressir::checker::check(&mut w2, d);
         for n in &notes {
             println!("[{}] {}: {}", n.severity, n.id, n.message);
         }
         return;
     }
     let name = std::env::var("CHECKER_DBG_NAME").unwrap_or_else(|_| "remark_entity".into());
-    let fills = expressir_rs::checker::debug_fills(&wire, &name);
+    let fills = expressir::checker::debug_fills(&wire, &name);
     println!("--- fills for '{name}': {}", fills.len());
 }

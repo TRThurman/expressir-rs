@@ -181,7 +181,7 @@ fn lsp_rename_edits_match_the_ruby_workspace_byte_for_byte() {
         let target = case_data["target"].as_str().expect("target");
         let path = format!("document.exp.{schema}.{target}");
         let edits: Value = match serde_json::from_str(
-            &expressir_rs::lsp::rename_edits_json(source, &path).expect("rs edits"),
+            &expressir::lsp::rename_edits_json(source, &path).expect("rs edits"),
         ) {
             Ok(edits) => edits,
             Err(e) => {

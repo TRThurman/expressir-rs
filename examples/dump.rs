@@ -5,7 +5,7 @@
 
 use std::io::Write as _;
 
-use expressir_rs::ParsedTree;
+use expressir::ParsedTree;
 use parsanol::portable::{AstArena, AstNode};
 use serde_json::{json, Map, Value};
 

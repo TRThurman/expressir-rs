@@ -120,14 +120,14 @@ fn run_parity(options: &Value) {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        let Ok(tree) = expressir_rs::ParsedTree::parse(&source) else {
+        let Ok(tree) = expressir::ParsedTree::parse(&source) else {
             eprintln!("skip (rust lane cannot parse): {key}");
             continue;
         };
         let Ok(wire) = tree.to_model_json(&key) else {
             continue;
         };
-        match expressir_rs::formatter::pretty_format(&wire, "", &options.to_string()) {
+        match expressir::formatter::pretty_format(&wire, "", &options.to_string()) {
             Ok(text) => {
                 rust.insert(key.clone(), Value::String(text));
                 wires.insert(key, wire);

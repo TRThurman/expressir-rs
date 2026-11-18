@@ -168,7 +168,7 @@ fn ruby_scan(expressir_dir: &Path, files: &[PathBuf], inline: &[String]) -> Valu
 }
 
 fn rust_scan(source: &str) -> Vec<Value> {
-    expressir_rs::remark::scan(source)
+    expressir::remark::scan(source)
         .into_iter()
         .map(|remark| {
             json!({

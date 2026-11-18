@@ -3,7 +3,7 @@
 //! Both lanes start from the SAME attached wire: the attachment runs in
 //! Rust (tagged + untagged), then the Ruby lane hydrates the model and
 //! runs the product `Expressir::Express::Formatter` while the Rust lane
-//! runs `expressir_rs::formatter::format` over the same wire. The
+//! runs `expressir::formatter::format` over the same wire. The
 //! rendered text must be byte-identical. A second pass formats with
 //! `no_remarks` on both sides. Skipped without `EXPRESSIR_DIR`.
 
@@ -130,7 +130,7 @@ fn formatter_matches_ruby_over_the_corpus() {
         let Ok(source) = std::fs::read_to_string(path) else {
             continue;
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => {
                 eprintln!("skip (rust lane cannot parse): {key}");
@@ -142,10 +142,10 @@ fn formatter_matches_ruby_over_the_corpus() {
             Err(_) => continue,
         };
         let mut attached = wire.clone();
-        expressir_rs::attach::attach_tagged_remarks(&mut attached, &source, false);
-        expressir_rs::attach::attach_untagged_remarks(&mut attached, &source, false);
-        let text = expressir_rs::formatter::format(&attached, false);
-        let no_remarks = expressir_rs::formatter::format(&attached, true);
+        expressir::attach::attach_tagged_remarks(&mut attached, &source, false);
+        expressir::attach::attach_untagged_remarks(&mut attached, &source, false);
+        let text = expressir::formatter::format(&attached, false);
+        let no_remarks = expressir::formatter::format(&attached, true);
         rust.insert(key.clone(), (text, no_remarks));
         wires.insert(key, attached);
     }

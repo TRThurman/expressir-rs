@@ -72,7 +72,7 @@ fn remark_items_round_trip_over_the_samples_corpus() {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => continue,
         };
@@ -80,13 +80,13 @@ fn remark_items_round_trip_over_the_samples_corpus() {
             Ok(w) => w,
             Err(_) => continue,
         };
-        expressir_rs::attach::attach_tagged_remarks(&mut wire, &source, false);
-        expressir_rs::attach::attach_untagged_remarks(&mut wire, &source, false);
+        expressir::attach::attach_tagged_remarks(&mut wire, &source, false);
+        expressir::attach::attach_untagged_remarks(&mut wire, &source, false);
         let before = remark_item_count(&wire);
         if before == 0 {
             continue;
         }
-        let rendered = expressir_rs::formatter::format(&wire, false);
+        let rendered = expressir::formatter::format(&wire, false);
         let markers = rendered.matches("(*\"").count() + rendered.matches("--\"").count();
         compared += 1;
         if markers < before {
@@ -110,7 +110,7 @@ fn remark_items_round_trip_over_the_samples_corpus() {
             }
         }
         // Round trip: re-parse the rendered text; the items must survive.
-        let tree2 = match expressir_rs::ParsedTree::parse(&rendered) {
+        let tree2 = match expressir::ParsedTree::parse(&rendered) {
             Ok(t) => t,
             Err(_) => continue,
         };
@@ -118,8 +118,8 @@ fn remark_items_round_trip_over_the_samples_corpus() {
             Ok(w) => w,
             Err(_) => continue,
         };
-        expressir_rs::attach::attach_tagged_remarks(&mut wire2, &rendered, false);
-        expressir_rs::attach::attach_untagged_remarks(&mut wire2, &rendered, false);
+        expressir::attach::attach_tagged_remarks(&mut wire2, &rendered, false);
+        expressir::attach::attach_untagged_remarks(&mut wire2, &rendered, false);
         let after = remark_item_count(&wire2);
         if after < before {
             dropped += 1;

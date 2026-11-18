@@ -4,7 +4,7 @@
 //! and the Part 21 population — so a regression in the wire behavior
 //! is caught without a wasm toolchain.
 
-use expressir_rs::wasm;
+use expressir::wasm;
 
 const SCHEMA: &str = "SCHEMA demo;\nENTITY e;\n  a : STRING;\n  (*\"demo.e\" the note *)\nEND_ENTITY;\nEND_SCHEMA;\n";
 const POPULATION: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('x');\nENDSEC;\nDATA;\n#1=E('v');\nENDSEC;\nEND-ISO-10303-21;\n";

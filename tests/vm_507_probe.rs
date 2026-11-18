@@ -19,7 +19,7 @@ fn ground_truth_three_paths() {
     .unwrap();
     println!("bytes: {}", source.len());
 
-    let grammar = expressir_rs::grammar();
+    let grammar = expressir::grammar();
     let mut arena = AstArena::for_input(source.len());
     arena.set_input(source.clone());
     let packrat_end = PortableParser::new(grammar, &source, &mut arena)

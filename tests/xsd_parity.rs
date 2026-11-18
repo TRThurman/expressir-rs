@@ -111,7 +111,7 @@ fn xsd_format_matches_the_ruby_writer_byte_for_byte() {
             failures.push(format!("{key}: ruby lane errored: {error}"));
             continue;
         }
-        let rs_xml = expressir_rs::xsd::xsd_xml_json(
+        let rs_xml = expressir::xsd::xsd_xml_json(
             &serde_json::to_string(&entry["schema_wire"]).expect("schema wire"),
         )
         .unwrap_or_else(|e| format!("rs error: {e}"));

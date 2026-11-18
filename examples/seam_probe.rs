@@ -1,4 +1,4 @@
-use expressir_rs::ParsedTree;
+use expressir::ParsedTree;
 
 fn main() {
     let path = std::env::args()

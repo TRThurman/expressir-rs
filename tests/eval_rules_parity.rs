@@ -149,7 +149,7 @@ fn read(path: &Path) -> String {
 }
 
 fn schema_wire_of(source: &str, name: &str) -> Value {
-    let tree = expressir_rs::ParsedTree::parse(source)
+    let tree = expressir::ParsedTree::parse(source)
         .unwrap_or_else(|e| panic!("rs lane parses {name}: {e:?}"));
     let wire = tree
         .to_model_json(name)
@@ -234,7 +234,7 @@ fn eval_rules_parity() {
         let expected = ruby.get(id).expect("ruby lane result");
         let mut population_request = expected["population"].clone();
         population_request["mutations"] = mutations.clone();
-        let rust = match expressir_rs::eval_rules::check_json(
+        let rust = match expressir::eval_rules::check_json(
             &schema.to_string(),
             &population_request.to_string(),
         ) {

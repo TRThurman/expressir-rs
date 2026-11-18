@@ -2,7 +2,7 @@
 //!
 //! Both lanes run over the SAME wire: Ruby hydrates the model, resolves
 //! references (`ResolveReferencesModelVisitor`), and runs the product
-//! `Checker`; the Rust lane runs `expressir_rs::checker::check` over
+//! `Checker`; the Rust lane runs `expressir::checker::check` over
 //! the wire directly. Findings reduce to the canonical `validate check`
 //! shape — `{id, severity, schema, message}` — and the sequences must
 //! match exactly. Skipped without `EXPRESSIR_DIR`.
@@ -138,7 +138,7 @@ fn ruby_notes(
 
 fn rust_notes(wire: &Value, dialect: Option<&str>) -> Value {
     let mut wire = wire.clone();
-    let notes = expressir_rs::checker::check(&mut wire, dialect);
+    let notes = expressir::checker::check(&mut wire, dialect);
     Value::Array(
         notes
             .iter()
@@ -170,7 +170,7 @@ fn run_parity(dialect: Option<&str>) {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => {
                 eprintln!("skip (rust lane cannot parse): {key}");
@@ -235,7 +235,7 @@ mod find_repro {
             return;
         };
         let wire: Value = serde_json::from_str(&text).unwrap();
-        let ctx = expressir_rs::checker::Ctx::new(&wire);
+        let ctx = expressir::checker::Ctx::new(&wire);
         let hit = ctx.find("/files/1/schemas/0/interfaces/0/schema", "alpha");
         println!("find => {hit:?}");
         let by_root = ctx.children_by_id("");

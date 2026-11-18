@@ -5,7 +5,7 @@
 
 use std::time::Instant;
 
-use expressir_rs::ParsedTree;
+use expressir::ParsedTree;
 use parsanol::portable::{AstArena, PortableParser};
 
 fn main() {
@@ -18,7 +18,7 @@ fn main() {
     let kb: usize = sources.iter().map(|s| s.len()).sum::<usize>() / 1024;
     println!("{} files, {} KB", paths.len(), kb);
 
-    let grammar = expressir_rs::grammar().clone();
+    let grammar = expressir::grammar().clone();
 
     let runs = 3;
     let mut parse_only = f64::MAX;
