@@ -134,7 +134,7 @@ fn run_parity() {
             continue;
         };
         let Ok(mut tree_wire) =
-            expressir_rs::ParsedTree::parse(&source).map(|t| t.to_model_json(&key).unwrap())
+            expressir::ParsedTree::parse(&source).map(|t| t.to_model_json(&key).unwrap())
         else {
             eprintln!("skip (rust lane cannot parse): {key}");
             continue;
@@ -142,7 +142,7 @@ fn run_parity() {
         // InterfaceDot reads the interfaces as resolved schema names —
         // resolve the wire first (the ruby lane's InterfaceDot reads
         // iface.schema strings left by the native parse).
-        expressir_rs::checker::resolve_references(&mut tree_wire);
+        expressir::checker::resolve_references(&mut tree_wire);
         wires.insert(key, tree_wire);
     }
 
@@ -163,7 +163,7 @@ fn run_parity() {
             .unwrap_or(Value::Null);
 
         if let Some(expected) = row["owl"].as_str() {
-            let actual = match expressir_rs::interop::owl_json(
+            let actual = match expressir::interop::owl_json(
                 &schema.to_string(),
                 "https://gate.example/x#",
             ) {
@@ -187,7 +187,7 @@ fn run_parity() {
         }
 
         if let Some(expected) = row["json_schema"].as_str() {
-            let actual = match expressir_rs::interop::json_schema_json(&schema.to_string()) {
+            let actual = match expressir::interop::json_schema_json(&schema.to_string()) {
                 Ok(text) => text,
                 Err(message) => format!("ERROR {message}"),
             };
@@ -201,7 +201,7 @@ fn run_parity() {
 
         if let Some(expected) = row["dot"].as_str() {
             let repository = repository_wire(wire);
-            let options = expressir_rs::interop::DotOptions {
+            let options = expressir::interop::DotOptions {
                 iface: "both",
                 uf_color: "blue",
                 rf_color: "green",
@@ -209,7 +209,7 @@ fn run_parity() {
                 prune: &[],
                 version: &version,
             };
-            let actual = expressir_rs::interop::interface_dot(&repository, 0, &options);
+            let actual = expressir::interop::interface_dot(&repository, 0, &options);
             compared += 1;
             if actual != expected {
                 mismatches.push(format!(

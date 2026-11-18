@@ -1,9 +1,9 @@
 fn main() {
     let path = std::env::args().nth(1).expect("file");
     let source = std::fs::read_to_string(&path).unwrap();
-    let tree = expressir_rs::ParsedTree::parse(&source).unwrap();
+    let tree = expressir::ParsedTree::parse(&source).unwrap();
     let mut wire = tree.to_model_json(&path).unwrap();
-    expressir_rs::attach::attach_tagged_remarks(&mut wire, &source, false);
+    expressir::attach::attach_tagged_remarks(&mut wire, &source, false);
     fn walk(n: &serde_json::Value, path: &str) -> bool {
         if let Some(o) = n.as_object() {
             if o.contains_key("supertype_expression")

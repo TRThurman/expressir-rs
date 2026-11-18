@@ -152,15 +152,14 @@ fn lsp_symbols_match_the_ruby_walk_over_the_corpus() {
             failures.push(format!("{key}: ruby lane errored: {error}"));
             continue;
         }
-        let rs_rows: Vec<Value> = match serde_json::from_str(
-            &expressir_rs::lsp::symbols_json(source).expect("rs rows"),
-        ) {
-            Ok(rows) => rows,
-            Err(e) => {
-                failures.push(format!("{key}: rs errored: {e}"));
-                continue;
-            }
-        };
+        let rs_rows: Vec<Value> =
+            match serde_json::from_str(&expressir::lsp::symbols_json(source).expect("rs rows")) {
+                Ok(rows) => rows,
+                Err(e) => {
+                    failures.push(format!("{key}: rs errored: {e}"));
+                    continue;
+                }
+            };
         let ruby_rows = entry["symbols"].as_array().cloned().unwrap_or_default();
         compared += 1;
 

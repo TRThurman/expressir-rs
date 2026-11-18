@@ -1,10 +1,10 @@
 fn main() {
     let path = std::env::args().nth(1).expect("file");
     let source = std::fs::read_to_string(&path).unwrap();
-    let tree = expressir_rs::ParsedTree::parse(&source).unwrap();
+    let tree = expressir::ParsedTree::parse(&source).unwrap();
     let mut wire = tree.to_model_json(&path).unwrap();
-    expressir_rs::attach::attach_tagged_remarks(&mut wire, &source, false);
-    expressir_rs::attach::attach_untagged_remarks(&mut wire, &source, false);
+    expressir::attach::attach_tagged_remarks(&mut wire, &source, false);
+    expressir::attach::attach_untagged_remarks(&mut wire, &source, false);
     fn walk(n: &serde_json::Value, path: &str) {
         if let Some(o) = n.as_object() {
             if o.get("_class")
@@ -36,7 +36,7 @@ fn main() {
         }
     }
     walk(&wire, "");
-    let text = expressir_rs::formatter::format(&wire, false);
+    let text = expressir::formatter::format(&wire, false);
     let lines: Vec<&str> = text.lines().collect();
     println!("formatted lines 36-42:");
     for (i, l) in lines.iter().enumerate().skip(35).take(7) {

@@ -8,7 +8,7 @@
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 
-use expressir_rs::ffi::c_express as abi;
+use expressir::ffi::c_express as abi;
 
 fn take(ptr: *mut c_char) -> String {
     assert!(

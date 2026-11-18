@@ -9,7 +9,7 @@ fn main() {
     let paths: Vec<String> = std::env::args().skip(1).collect();
     assert!(!paths.is_empty(), "usage: normalize_bench <file.exp>...");
 
-    let grammar = expressir_rs::grammar().clone();
+    let grammar = expressir::grammar().clone();
     let mut parse_raw = 0.0f64;
     let mut normalize = 0.0f64;
     let mut bytes = 0usize;

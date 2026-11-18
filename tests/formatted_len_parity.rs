@@ -126,12 +126,12 @@ fn ruby_lengths(
 /// collections (the action statements and the otherwise body, never the
 /// position-less CaseAction wrapper or its labels).
 fn rust_lengths(wire: &Value) -> Vec<(String, u64, usize, usize)> {
-    let map = expressir_rs::format_len::lengths_by_ptr(wire);
+    let map = expressir::format_len::lengths_by_ptr(wire);
     let mut out = Vec::new();
     fn walk(
         node: &Value,
         ptr: &str,
-        map: &std::collections::HashMap<String, expressir_rs::format_len::Piece>,
+        map: &std::collections::HashMap<String, expressir::format_len::Piece>,
         out: &mut Vec<(String, u64, usize, usize)>,
     ) {
         let Some(obj) = node.as_object() else {
@@ -253,7 +253,7 @@ fn formatted_lengths_match_ruby_over_the_corpus() {
             Ok(s) => s,
             Err(_) => continue,
         };
-        let tree = match expressir_rs::ParsedTree::parse(&source) {
+        let tree = match expressir::ParsedTree::parse(&source) {
             Ok(t) => t,
             Err(_) => continue,
         };

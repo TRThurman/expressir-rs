@@ -15,7 +15,7 @@ fn resolve_uses_the_root_path_segment() {
             ]
         }]
     });
-    let n = expressir_rs::checker::resolve_references(&mut wire);
+    let n = expressir::checker::resolve_references(&mut wire);
     assert!(n > 0, "nothing resolved");
     let fill = wire["schemas"][0]["entities"][1]["subtype_of"][0]["base_path"]
         .as_str()

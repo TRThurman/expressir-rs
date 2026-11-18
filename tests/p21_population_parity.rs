@@ -34,7 +34,7 @@ const CORPUS: &[(&str, &str)] = &[
 ];
 
 fn inventory_json(source: &str) -> Value {
-    let population = expressir_rs::population::parse_population(source)
+    let population = expressir::population::parse_population(source)
         .unwrap_or_else(|err| panic!("artifact parse failed: {err}"));
     serde_json::json!({
         "file_schemas": population.file_schemas,

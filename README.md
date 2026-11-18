@@ -10,7 +10,7 @@ The Rust core for [expressir](https://github.com/lutaml/expressir): EXPRESS
 ## Purpose
 
 expressir's Ruby parser spends most of its time in tree conversion.
-expressir-rs moves that work into Rust: it parses EXPRESS sources on the
+The **expressir** crate (this repository, expressir-rs) moves that work into Rust: it parses EXPRESS sources on the
 parsanol packrat engine (grammar embedded from the Ruby tier) and emits
 the sparse lutaml wire JSON — the exact shape
 `Expressir::Model::ExpFile#to_hash` produces — so Ruby hydrates with

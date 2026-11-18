@@ -166,12 +166,12 @@ fn run_parity() {
             continue;
         };
         let Ok(mut tree_wire) =
-            expressir_rs::ParsedTree::parse(&source).map(|t| t.to_model_json(&key).unwrap())
+            expressir::ParsedTree::parse(&source).map(|t| t.to_model_json(&key).unwrap())
         else {
             eprintln!("skip (rust lane cannot parse): {key}");
             continue;
         };
-        expressir_rs::checker::resolve_references(&mut tree_wire);
+        expressir::checker::resolve_references(&mut tree_wire);
         wires.insert(key, tree_wire);
     }
 
@@ -209,7 +209,7 @@ fn run_parity() {
                 ""
             };
             let actual =
-                match expressir_rs::formatter::format_flavored(wire, path, &options.to_string()) {
+                match expressir::formatter::format_flavored(wire, path, &options.to_string()) {
                     Ok(text) => text,
                     Err(message) => {
                         mismatches.push(format!("{key}/{face}: rust lane failed: {message}"));

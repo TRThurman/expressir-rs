@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use expressir_rs::population::{parse_full_population, write_population};
+use expressir::population::{parse_full_population, write_population};
 
 fn corpus() -> Vec<(String, String)> {
     let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/p21_corpus");
@@ -60,9 +60,9 @@ fn re_emits_named_sections_and_anchors() {
 
 #[test]
 fn round_trips_a_constructed_population() {
-    use expressir_rs::population::{Instance, P21Value as Value, Record, Section, Typed};
+    use expressir::population::{Instance, P21Value as Value, Record, Section, Typed};
 
-    let population = expressir_rs::population::FullPopulation {
+    let population = expressir::population::FullPopulation {
         header: vec![(
             "FILE_SCHEMA".to_string(),
             vec![Value::List(vec![Value::Str("DEMO".to_string())])],
@@ -127,7 +127,7 @@ fn round_trips_a_constructed_population() {
 
 #[test]
 fn json_interchange_is_value_identical() {
-    use expressir_rs::population::{population_from_json_value, population_to_json_value};
+    use expressir::population::{population_from_json_value, population_to_json_value};
     for (name, source) in corpus() {
         let population = parse_full_population(&source)
             .unwrap_or_else(|err| panic!("{name}: parse failed: {err}"));

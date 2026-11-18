@@ -11,13 +11,13 @@ use serde_json::Value;
 #[test]
 fn absolute_tag_inside_a_scope_takes_the_leaf_id() {
     let source = "SCHEMA demo_schema;\nFUNCTION f : INTEGER;\n(*\"demo_schema.f.lv\"\n\nthe lv remark\n\n*)\nRETURN(1);\nEND_FUNCTION;\nEND_SCHEMA;\n";
-    let wire = expressir_rs::ParsedTree::parse(source)
+    let wire = expressir::ParsedTree::parse(source)
         .expect("parses")
         .to_model_json("demo_schema.exp")
         .expect("wire");
     let mut attached = wire.clone();
-    expressir_rs::attach::attach_tagged_remarks(&mut attached, source, false);
-    expressir_rs::attach::attach_untagged_remarks(&mut attached, source, false);
+    expressir::attach::attach_tagged_remarks(&mut attached, source, false);
+    expressir::attach::attach_untagged_remarks(&mut attached, source, false);
 
     let item = attached
         .pointer("/schemas/0/functions/0/remark_items/0")

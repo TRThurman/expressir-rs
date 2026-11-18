@@ -11,7 +11,7 @@ fn wire_for(expr: &str) -> serde_json::Value {
         "SCHEMA y_1;\nFUNCTION f(s : INTEGER; sv : INTEGER; a : INTEGER; c : REAL; t : SET OF INTEGER) : GENERIC;\n  RETURN ({});\nEND_FUNCTION;\nEND_SCHEMA;\n",
         expr
     );
-    let tree = expressir_rs::ParsedTree::parse(&src).expect("must parse");
+    let tree = expressir::ParsedTree::parse(&src).expect("must parse");
     tree.to_model_json("y_1.exp").expect("wire")
 }
 
@@ -62,7 +62,7 @@ fn identifier_s_before_in_with_structured_rhs() {
             "SCHEMA y_1;\nENTITY q;\n  items : LIST OF INTEGER;\nEND_ENTITY;\nENTITY grp;\n  items : LIST OF INTEGER;\nEND_ENTITY;\nENTITY e;\n  r : grp;\nWHERE\n  wr1: {};\nEND_ENTITY;\nEND_SCHEMA;\n",
             expr
         );
-        let tree = expressir_rs::ParsedTree::parse(&src).expect("must parse");
+        let tree = expressir::ParsedTree::parse(&src).expect("must parse");
         let v = tree.to_model_json("y_1.exp").expect("wire");
         let ret = &v["schemas"][0]["entities"][2]["where_rules"][0]["expression"];
         assert_eq!(

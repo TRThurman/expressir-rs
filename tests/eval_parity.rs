@@ -196,7 +196,7 @@ fn eval_parity() {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/eval_gate.exp"),
     )
     .expect("gate fixture");
-    let tree = expressir_rs::ParsedTree::parse(&source).expect("rs lane parses the fixture");
+    let tree = expressir::ParsedTree::parse(&source).expect("rs lane parses the fixture");
     let wire = tree
         .to_model_json("eval_gate.exp")
         .expect("rs lane emits the wire");
@@ -215,7 +215,7 @@ fn eval_parity() {
 
     let mut mismatches: Vec<String> = Vec::new();
     for (id, wire) in &cases {
-        let rust = match expressir_rs::eval::evaluate_json(
+        let rust = match expressir::eval::evaluate_json(
             &wire.to_string(),
             &Value::Object(vars.clone()).to_string(),
         ) {

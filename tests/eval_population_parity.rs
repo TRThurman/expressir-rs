@@ -161,7 +161,7 @@ fn eval_population_parity() {
   END_RULE;
 END_SCHEMA;"#;
 
-    let tree = expressir_rs::ParsedTree::parse(schema_source).expect("rs lane parses the schema");
+    let tree = expressir::ParsedTree::parse(schema_source).expect("rs lane parses the schema");
     let wire = tree.to_model_json("pop_demo.exp").expect("rs wire");
     let schema_wire = &wire["schemas"][0];
 
@@ -202,7 +202,7 @@ END_SCHEMA;"#;
     for (id, _) in &cases {
         let expected = ruby.get(id).expect("ruby lane result");
         let population_request = expected["population"].clone();
-        let rust = match expressir_rs::eval_rules::population_check_json(
+        let rust = match expressir::eval_rules::population_check_json(
             &schema_wire.to_string(),
             &population_request.to_string(),
         ) {

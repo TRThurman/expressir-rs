@@ -75,10 +75,10 @@ fn main() {
     let paths: Vec<String> = std::env::args().skip(1).collect();
     assert!(!paths.is_empty(), "usage: vm_bench <file.exp>...");
 
-    let grammar = expressir_rs::grammar().clone();
+    let grammar = expressir::grammar().clone();
 
     let t0 = Instant::now();
-    let program = compile_bytecode(expressir_rs::grammar().clone()).expect("bytecode compile");
+    let program = compile_bytecode(expressir::grammar().clone()).expect("bytecode compile");
     println!("program compile: {:.2}s", t0.elapsed().as_secs_f64());
 
     let mut packrat_s = 0.0f64;

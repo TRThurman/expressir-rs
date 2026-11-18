@@ -106,7 +106,7 @@ fn ascii_scan_matches_the_ruby_engine_over_the_corpus() {
 
     let mut failures = Vec::new();
     for (path, source) in &sources {
-        let rust_rows = expressir_rs::validate_ascii::scan_source(source, false);
+        let rust_rows = expressir::validate_ascii::scan_source(source, false);
         let Some(ruby_rows) = ruby.get(path).and_then(Value::as_array) else {
             continue;
         };

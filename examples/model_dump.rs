@@ -14,7 +14,7 @@ fn main() {
         .unwrap_or_else(|| format!("{}.model.json", path));
 
     let source = std::fs::read_to_string(&path).expect("read input");
-    let tree = expressir_rs::ParsedTree::parse(&source).expect("parse");
+    let tree = expressir::ParsedTree::parse(&source).expect("parse");
     let rendered = serde_json::to_string_pretty(&tree.to_model()).expect("serialize model");
 
     let mut out = std::fs::File::create(&out_path).expect("create output");
