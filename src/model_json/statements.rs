@@ -77,10 +77,11 @@ fn assignment_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     let mut m = node(CLASS_ASSIGNMENT);
     let mut r#ref = hash_get(arena, n, "generalRef").and_then(|g| general_ref_json(arena, &g))?;
     if let Some(quals) = hash_get(arena, n, "qualifier") {
-        // The assignment TARGET selects at the member name even
-        // after an index qualifier — the ruby assign builder attaches
-        // over the attributeRef alone (the corpus gate's LHS rows).
-        r#ref = apply_qualifiers(arena, r#ref, Some(quals), false)?;
+        // The assignment TARGET selects at its qualifier capture's
+        // dot even after an index qualifier (`u[2].attr := ...` → the
+        // dot); expressions select at the member name (the corpus
+        // gate's RETURN/TYPEOF rows).
+        r#ref = apply_qualifiers(arena, r#ref, Some(quals), true)?;
     }
     m.insert("ref".into(), r#ref);
     put(
