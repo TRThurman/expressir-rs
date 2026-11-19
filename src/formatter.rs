@@ -503,12 +503,39 @@ impl<'a> Formatter<'a> {
             out.push(decls.join("\n\n"));
             out.push(String::new());
         }
+        for remark in self.format_schema_remarks(node) {
+            out.push(String::new());
+            out.push(remark);
+        }
         for remark in self.format_remark_items_children(ptr) {
             out.push(String::new());
             out.push(remark);
         }
         out.push(format!("END_SCHEMA;{}", self.format_end_scope_remark(node)));
         out.join("\n")
+    }
+
+    // The schema's own tagged description (`(*"schema_id" ... *)`) as a
+    // remark block, so a schema-level tagged description survives a
+    // source round trip (it re-attaches to the schema). Mirrors the
+    // ruby lane's format_schema_remarks byte-for-byte.
+    fn format_schema_remarks(&self, node: &Value) -> Vec<String> {
+        if self.no_remarks {
+            return Vec::new();
+        }
+        let id = id_of(node).unwrap_or_default();
+        arr(node, "remarks")
+            .iter()
+            .filter_map(|r| r.as_str())
+            .filter(|s| !s.is_empty())
+            .map(|remark| {
+                if remark.contains('\n') {
+                    format!("(*\"{id}\"\n{remark}\n*)")
+                } else {
+                    format!("(*\"{id}\" {remark} *)")
+                }
+            })
+            .collect()
     }
 
     fn format_schema_head(&mut self, ptr: &str, node: &Value) -> String {
