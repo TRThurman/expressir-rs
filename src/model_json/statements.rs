@@ -77,7 +77,10 @@ fn assignment_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     let mut m = node(CLASS_ASSIGNMENT);
     let mut r#ref = hash_get(arena, n, "generalRef").and_then(|g| general_ref_json(arena, &g))?;
     if let Some(quals) = hash_get(arena, n, "qualifier") {
-        r#ref = apply_qualifiers(arena, r#ref, Some(quals))?;
+        // The assignment TARGET selects at the member name even
+        // after an index qualifier — the ruby assign builder attaches
+        // over the attributeRef alone (the corpus gate's LHS rows).
+        r#ref = apply_qualifiers(arena, r#ref, Some(quals), false)?;
     }
     m.insert("ref".into(), r#ref);
     put(
@@ -100,7 +103,7 @@ fn alias_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     let mut expression =
         hash_get(arena, n, "generalRef").and_then(|g| general_ref_json(arena, &g))?;
     if let Some(quals) = hash_get(arena, n, "qualifier") {
-        expression = apply_qualifiers(arena, expression, Some(quals))?;
+        expression = apply_qualifiers(arena, expression, Some(quals), true)?;
     }
     m.insert("expression".into(), expression);
     m.insert(
