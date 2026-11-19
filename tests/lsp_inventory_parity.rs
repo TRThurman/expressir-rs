@@ -126,7 +126,6 @@ fn doc_key(path: &Path) -> String {
 /// item; the gate goes required when the builder stamps those nodes
 /// from the name capture.
 #[test]
-#[ignore = "capture parity: expressir-rs#91 - the capture-START convention (one fixture, ~20-byte leading-token deltas)"]
 fn lsp_inventory_matches_the_ruby_walks_over_the_corpus() {
     let Some(expressir_dir) = expressir_dir() else {
         eprintln!("EXPRESSIR_DIR not set; skipping");
