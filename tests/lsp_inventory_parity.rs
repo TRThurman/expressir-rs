@@ -126,7 +126,6 @@ fn doc_key(path: &Path) -> String {
 /// item; the gate goes required when the builder stamps those nodes
 /// from the name capture.
 #[test]
-#[ignore = "capture parity: expressir-rs#91 - the capture-START convention (one fixture, ~20-byte leading-token deltas)"]
 fn lsp_inventory_matches_the_ruby_walks_over_the_corpus() {
     let Some(expressir_dir) = expressir_dir() else {
         eprintln!("EXPRESSIR_DIR not set; skipping");
@@ -287,7 +286,16 @@ fn lsp_inventory_matches_the_ruby_walks_over_the_corpus() {
             if let Some(base) = r["base_path"].as_str() {
                 if !paths.contains(base) {
                     let tail = base.rsplit('.').next().unwrap_or("");
-                    if symbol_tails.contains(tail) {
+                    // A fill whose PARENT is a declared node targets a
+                    // non-symbol member of it (a derived/inverse
+                    // attribute, a parameter) — the ruby resolver fills
+                    // those legitimately and the symbol declaration
+                    // rows deliberately omit them (SYMBOL_KINDS).
+                    let parent_declared = base
+                        .rsplit_once('.')
+                        .map(|(parent, _)| paths.contains(parent))
+                        .unwrap_or(false);
+                    if symbol_tails.contains(tail) && !parent_declared {
                         failures.push(format!("{key}: base_path {base} names no declaration path"));
                         break;
                     }
