@@ -318,12 +318,12 @@ pub(crate) fn apply_qualifiers(
         return Some(base);
     };
     let mut result = base;
-    // The corpus gate's convention (rs#567): an attribute member right
-    // after an INDEX qualifier selects at its own qualifier capture's
-    // start (the dot of `u[2].direction_ratios`); a member after a
-    // plain dot selects at the member name (`base.name`). Tracked as a
-    // flag the index arm raises and the attribute arm consumes.
-    let mut pending_dot_attach = false;
+    // The corpus gate's convention (rs#567): in an ASSIGNMENT TARGET
+    // (post_index_dot) the FIRST attribute member selects at its own
+    // qualifier capture's start — the dot (`v.direction_ratios[i] :=
+    // ...` and `u[2].direction_ratios[1] := ...` both select at the
+    // dot); every expression-path member selects at the member name.
+    let mut saw_attribute = false;
     for q in children_of(arena, &qualifiers, "qualifier") {
         if let Some(gq) = hash_get(arena, &q, "groupQualifier") {
             let mut m = node(CLASS_GROUP_REFERENCE);
@@ -334,20 +334,18 @@ pub(crate) fn apply_qualifiers(
                     .and_then(|er| simple_ref(arena, &er, REF_ID_KEYS))?,
             );
             result = obj(m);
-            pending_dot_attach = false;
         } else if let Some(aq) = hash_get(arena, &q, "attributeQualifier") {
             let mut m = node(CLASS_ATTRIBUTE_REFERENCE);
             m.insert("ref".into(), result);
             let mut attribute = hash_get(arena, &aq, "attributeRef")
                 .and_then(|ar| simple_ref(arena, &ar, REF_ID_KEYS));
-            if let (Some(attribute), true) =
-                (attribute.as_mut(), pending_dot_attach && post_index_dot)
+            if let (Some(attribute), true) = (attribute.as_mut(), post_index_dot && !saw_attribute)
             {
                 attach_offset(arena, &aq, attribute);
             }
+            saw_attribute = true;
             m.insert("attribute".into(), attribute?);
             result = obj(m);
-            pending_dot_attach = false;
         } else if let Some(iq) = hash_get(arena, &q, "indexQualifier") {
             let mut m = node(CLASS_INDEX_REFERENCE);
             m.insert("ref".into(), result);
@@ -361,7 +359,6 @@ pub(crate) fn apply_qualifiers(
                 hash_get(arena, &iq, "index2").and_then(|i| index_json(arena, &i)),
             );
             result = obj(m);
-            pending_dot_attach = true;
         }
     }
     Some(result)
