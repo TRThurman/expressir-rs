@@ -696,7 +696,12 @@ pub fn add_remark_tagged(
         return false;
     }
     let suffix = class.rsplit("::").next().unwrap_or(class).to_string();
-    if supports_remarks(&suffix) {
+    if supports_remarks(&suffix) && tag.is_some() {
+        // The differentiation contract (#679): `remarks` holds the
+        // RENDERABLE (tagged) texts only — the ISO document templates
+        // render `remarks` unfiltered at several sites, so an untagged
+        // source comment must never land there. Untagged texts live
+        // solely in `untagged_remarks`.
         if node.get("remarks").and_then(Value::as_array).is_none() {
             node["remarks"] = Value::Array(Vec::new());
         }
@@ -777,13 +782,21 @@ mod wire_tests {
         let attrs = wire
             .pointer("/schemas/0/entities/0/attributes")
             .expect("attrs");
-        let remarks = attrs[0]
-            .get("remarks")
+        // The differentiation contract (#679): an untagged remark lives
+        // ONLY in untagged_remarks — `remarks` stays empty (it is the
+        // renderable, tagged-text array the ISO templates consume).
+        let remarks = attrs[0].get("remarks").map(|r| r.as_array().map(Vec::len));
+        assert!(
+            remarks.is_none() || matches!(remarks, Some(Some(0))) || matches!(remarks, Some(None)),
+            "untagged text must not land in remarks"
+        );
+        let infos = attrs[0]
+            .get("untagged_remarks")
             .and_then(Value::as_array)
-            .expect("remarks");
-        assert_eq!(remarks.len(), 1);
+            .expect("infos");
+        assert_eq!(infos.len(), 1);
         assert_eq!(
-            remarks[0],
+            infos[0]["text"],
             Value::String("a remark on the attribute".to_string())
         );
     }
@@ -3120,11 +3133,21 @@ mod untagged_tests {
         let source = "SCHEMA demo;\n  ENTITY thing;\n    name : STRING;\n  END_ENTITY; -- why\nEND_SCHEMA;\n";
         let wire = wire_with_untagged(source);
         let entity = wire.pointer("/schemas/0/entities/0").expect("entity");
-        let remarks = entity
-            .get("remarks")
+        // The differentiation contract (#679): the untagged text lives
+        // only in untagged_remarks.
+        let infos = entity
+            .get("untagged_remarks")
             .and_then(Value::as_array)
-            .expect("remarks");
-        assert_eq!(remarks[0], Value::String("why".to_string()));
+            .expect("infos");
+        assert_eq!(infos[0]["text"], Value::String("why".to_string()));
+        assert!(
+            entity
+                .get("remarks")
+                .and_then(Value::as_array)
+                .map(|r| r.is_empty())
+                .unwrap_or(true),
+            "untagged text must not land in remarks"
+        );
     }
 
     #[test]
@@ -3166,11 +3189,15 @@ mod untagged_tests {
         let stmt = wire
             .pointer("/schemas/0/procedures/0/statements/0")
             .expect("first statement");
-        let remarks = stmt
-            .get("remarks")
-            .and_then(Value::as_array)
-            .expect("remarks");
-        assert_eq!(remarks[0], Value::String("why".to_string()));
+        // The differentiation contract (#679): the untagged text lives
+        // only in untagged_remarks.
+        assert!(
+            stmt.get("remarks")
+                .and_then(Value::as_array)
+                .map(|r| r.is_empty())
+                .unwrap_or(true),
+            "untagged text must not land in remarks"
+        );
         let infos = stmt
             .get("untagged_remarks")
             .and_then(Value::as_array)
