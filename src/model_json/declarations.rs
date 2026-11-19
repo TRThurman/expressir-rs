@@ -487,8 +487,18 @@ fn put_supersuper(arena: &AstArena, m: &mut Map<String, Value>, subsuper: &AstNo
                 .and_then(|se| {
                     supertype_expression_json(arena, &se).map(|mut se_v| {
                         attach_offset(arena, &se, &mut se_v);
-                        if let Some(kw) = keyword {
-                            stamp_reference_offsets(&mut se_v, kw);
+                        // The bare factor's reference rides the keyword
+                        // (`SUPERTYPE OF (name)`); ONEOF members keep
+                        // their own names (the ruby builder attaches
+                        // those over their own refs, not the rule).
+                        let bare = se_v
+                            .get("_class")
+                            .and_then(serde_json::Value::as_str)
+                            .is_some_and(|c| c.ends_with("SimpleReference"));
+                        if bare {
+                            if let Some(kw) = keyword {
+                                stamp_reference_offsets(&mut se_v, kw);
+                            }
                         }
                         se_v
                     })

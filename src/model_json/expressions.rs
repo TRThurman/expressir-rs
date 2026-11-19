@@ -275,7 +275,7 @@ fn primary_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     if let Some(pop) = hash_get(arena, n, "population") {
         let factor = hash_get(arena, &pop, "entityRef")
             .and_then(|er| simple_ref(arena, &er, REF_ID_KEYS))?;
-        return apply_qualifiers(arena, factor, hash_get(arena, n, "qualifier"), true);
+        return apply_qualifiers(arena, factor, hash_get(arena, n, "qualifier"), false);
     }
     if let Some(e) = hash_get(arena, n, "expression") {
         return expression_json(arena, &e);
@@ -304,7 +304,7 @@ fn qualifiable_factor_json(
             })
         })
     }?;
-    apply_qualifiers(arena, base, qualifiers, true)
+    apply_qualifiers(arena, base, qualifiers, false)
 }
 
 /// Applies qualifier nodes left-to-right, wrapping the reference.
