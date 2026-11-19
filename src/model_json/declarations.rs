@@ -477,11 +477,19 @@ fn put_supersuper(arena: &AstArena, m: &mut Map<String, Value>, subsuper: &AstNo
         is_abstract = abstract_decl.is_some() || abstract_supertype.is_some();
 
         if let Some(rule) = hash_get(arena, &constraint, "supertypeRule") {
+            // Family 2 (rs#567): the ruby builder chain re-attaches every
+            // node over the outermost capture, so each supertype
+            // REFERENCE inside the expression carries the capture's
+            // start — the SUPERTYPE keyword — not its own name.
+            let keyword = crate::walk::first_slice_offset(arena, &rule, 0);
             supertype_expression = hash_get(arena, &rule, "subtypeConstraint")
                 .and_then(|sc| hash_get(arena, &sc, "supertypeExpression"))
                 .and_then(|se| {
                     supertype_expression_json(arena, &se).map(|mut se_v| {
                         attach_offset(arena, &se, &mut se_v);
+                        if let Some(kw) = keyword {
+                            stamp_reference_offsets(&mut se_v, kw);
+                        }
                         se_v
                     })
                 });
@@ -969,4 +977,34 @@ fn fill_algorithm(arena: &AstArena, m: &mut Map<String, Value>, head: Option<Ast
 
 fn wrapped_id_text(arena: &AstArena, host: &AstNode, key: &str) -> Option<String> {
     hash_get(arena, host, key).and_then(|v| nested_text(arena, &v))
+}
+
+/// Overwrite every SimpleReference's `source_offset` inside a built
+/// value with `offset` — the ruby outermost-attach semantic, where the
+/// builder chain re-attaches nodes over the outermost capture so inner
+/// references carry the capture's start (rs#567 family 2).
+fn stamp_reference_offsets(value: &mut serde_json::Value, offset: u32) {
+    match value {
+        serde_json::Value::Object(map) => {
+            let is_reference = map
+                .get("_class")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|c| c.contains("References::"));
+            if is_reference {
+                map.insert(
+                    "source_offset".into(),
+                    serde_json::Value::from(u64::from(offset)),
+                );
+            }
+            for child in map.values_mut() {
+                stamp_reference_offsets(child, offset);
+            }
+        }
+        serde_json::Value::Array(items) => {
+            for item in items {
+                stamp_reference_offsets(item, offset);
+            }
+        }
+        _ => {}
+    }
 }

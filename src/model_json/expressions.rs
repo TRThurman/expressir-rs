@@ -275,7 +275,7 @@ fn primary_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     if let Some(pop) = hash_get(arena, n, "population") {
         let factor = hash_get(arena, &pop, "entityRef")
             .and_then(|er| simple_ref(arena, &er, REF_ID_KEYS))?;
-        return apply_qualifiers(arena, factor, hash_get(arena, n, "qualifier"));
+        return apply_qualifiers(arena, factor, hash_get(arena, n, "qualifier"), true);
     }
     if let Some(e) = hash_get(arena, n, "expression") {
         return expression_json(arena, &e);
@@ -304,7 +304,7 @@ fn qualifiable_factor_json(
             })
         })
     }?;
-    apply_qualifiers(arena, base, qualifiers)
+    apply_qualifiers(arena, base, qualifiers, true)
 }
 
 /// Applies qualifier nodes left-to-right, wrapping the reference.
@@ -312,11 +312,18 @@ pub(crate) fn apply_qualifiers(
     arena: &AstArena,
     base: Value,
     qualifiers: Option<AstNode>,
+    post_index_dot: bool,
 ) -> Option<Value> {
     let Some(qualifiers) = qualifiers else {
         return Some(base);
     };
     let mut result = base;
+    // The corpus gate's convention (rs#567): an attribute member right
+    // after an INDEX qualifier selects at its own qualifier capture's
+    // start (the dot of `u[2].direction_ratios`); a member after a
+    // plain dot selects at the member name (`base.name`). Tracked as a
+    // flag the index arm raises and the attribute arm consumes.
+    let mut pending_dot_attach = false;
     for q in children_of(arena, &qualifiers, "qualifier") {
         if let Some(gq) = hash_get(arena, &q, "groupQualifier") {
             let mut m = node(CLASS_GROUP_REFERENCE);
@@ -327,15 +334,20 @@ pub(crate) fn apply_qualifiers(
                     .and_then(|er| simple_ref(arena, &er, REF_ID_KEYS))?,
             );
             result = obj(m);
+            pending_dot_attach = false;
         } else if let Some(aq) = hash_get(arena, &q, "attributeQualifier") {
             let mut m = node(CLASS_ATTRIBUTE_REFERENCE);
             m.insert("ref".into(), result);
-            m.insert(
-                "attribute".into(),
-                hash_get(arena, &aq, "attributeRef")
-                    .and_then(|ar| simple_ref(arena, &ar, REF_ID_KEYS))?,
-            );
+            let mut attribute = hash_get(arena, &aq, "attributeRef")
+                .and_then(|ar| simple_ref(arena, &ar, REF_ID_KEYS));
+            if let (Some(attribute), true) =
+                (attribute.as_mut(), pending_dot_attach && post_index_dot)
+            {
+                attach_offset(arena, &aq, attribute);
+            }
+            m.insert("attribute".into(), attribute?);
             result = obj(m);
+            pending_dot_attach = false;
         } else if let Some(iq) = hash_get(arena, &q, "indexQualifier") {
             let mut m = node(CLASS_INDEX_REFERENCE);
             m.insert("ref".into(), result);
@@ -349,6 +361,7 @@ pub(crate) fn apply_qualifiers(
                 hash_get(arena, &iq, "index2").and_then(|i| index_json(arena, &i)),
             );
             result = obj(m);
+            pending_dot_attach = true;
         }
     }
     Some(result)
@@ -744,7 +757,16 @@ fn enumeration_reference_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
 /// (qualifier_builder.build_qualified_attribute).
 pub(crate) fn qualified_attribute_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     let attr = hash_get(arena, n, "attributeQualifier").and_then(|aq| {
-        hash_get(arena, &aq, "attributeRef").and_then(|ar| simple_ref(arena, &ar, REF_ID_KEYS))
+        hash_get(arena, &aq, "attributeRef")
+            .and_then(|ar| simple_ref(arena, &ar, REF_ID_KEYS))
+            .map(|mut r| {
+                // The ruby qualifier member's source_offset sits at the
+                // qualifier capture's start — the leading `.` — not at
+                // the member name (the UNIQUE-clause path; the
+                // expression path carries the same attach).
+                attach_offset(arena, &aq, &mut r);
+                r
+            })
     });
     let group = hash_get(arena, n, "groupQualifier").and_then(|gq| {
         let mut self_ref = node(CLASS_SIMPLE_REFERENCE);

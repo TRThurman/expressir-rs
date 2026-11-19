@@ -393,13 +393,24 @@ fn walk_inventory(
         // without a capture offset still gets a selection through
         // name_offset's window search from byte 0 (source_offset.to_i).
         if let Some(id) = map.get("id").and_then(Value::as_str) {
-            let sel = match map.get("source_offset").and_then(Value::as_u64) {
-                Some(offset) => {
-                    let window_end = ((offset as usize) + 1024).min(bytes.len());
-                    name_offset(&bytes[offset as usize..window_end], offset as usize, id)
-                        .unwrap_or(offset as usize)
+            // The ruby Document#name_offset convention: Attribute
+            // declarations select from the CAPTURE START verbatim (a
+            // redeclared `SELF\parent.attr` selects at SELF, not at
+            // the name); everything else searches the id occurrence.
+            let sel = if class == "Expressir::Model::Declarations::Attribute" {
+                match map.get("source_offset").and_then(Value::as_u64) {
+                    Some(offset) => offset as usize,
+                    None => 0,
                 }
-                None => name_offset(&bytes[..1024.min(bytes.len())], 0, id).unwrap_or(0),
+            } else {
+                match map.get("source_offset").and_then(Value::as_u64) {
+                    Some(offset) => {
+                        let window_end = ((offset as usize) + 1024).min(bytes.len());
+                        name_offset(&bytes[offset as usize..window_end], offset as usize, id)
+                            .unwrap_or(offset as usize)
+                    }
+                    None => name_offset(&bytes[..1024.min(bytes.len())], 0, id).unwrap_or(0),
+                }
             };
             declarations.push(serde_json::json!({
                 "id": id,
