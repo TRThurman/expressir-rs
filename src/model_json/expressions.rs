@@ -340,7 +340,9 @@ pub(crate) fn apply_qualifiers(
             m.insert("ref".into(), result);
             let mut attribute = hash_get(arena, &aq, "attributeRef")
                 .and_then(|ar| simple_ref(arena, &ar, REF_ID_KEYS));
-            if let (Some(attribute), true) = (attribute.as_mut(), pending_dot_attach && post_index_dot) {
+            if let (Some(attribute), true) =
+                (attribute.as_mut(), pending_dot_attach && post_index_dot)
+            {
                 attach_offset(arena, &aq, attribute);
             }
             m.insert("attribute".into(), attribute?);
