@@ -262,7 +262,14 @@ fn procedure_call_json(arena: &AstArena, n: &AstNode) -> Option<Value> {
     let procedure = if let Some(pr) = hash_get(arena, n, "procedureRef") {
         simple_ref(arena, &pr, REF_ID_KEYS)
     } else {
-        hash_get(arena, n, "builtInProcedure").map(|bip| keyword_ref_value(arena, &bip))
+        hash_get(arena, n, "builtInProcedure").map(|bip| {
+            // The corpus's built-in procedure call (`INSERT (...)`)
+            // carries the KEYWORD's byte in the ruby walk — the DSL
+            // probe's nil came from a different lane. Stamp it.
+            let mut r = keyword_ref_value(arena, &bip);
+            attach_offset(arena, &bip, &mut r);
+            r
+        })
     }?;
     m.insert("procedure".into(), procedure);
     put_list(&mut m, "parameters", actual_parameters_json(arena, n));
