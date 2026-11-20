@@ -2082,12 +2082,7 @@ impl<'a> Formatter<'a> {
 
     // ---- placement glue (Formatter#format's place_remarks) ----
 
-    fn place_remarks(
-        &mut self,
-        mut formatted: String,
-        ptr: &str,
-        node: &Value,
-    ) -> String {
+    fn place_remarks(&mut self, mut formatted: String, ptr: &str, node: &Value) -> String {
         let inline = self.formatted_inline_remarks(node, &|r: &Remark| r.region.is_none());
         if !inline.is_empty() {
             formatted.push_str(&inline);
