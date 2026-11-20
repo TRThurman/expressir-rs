@@ -2374,9 +2374,9 @@ pub const REGION_OTHERWISE: &str = "otherwise";
 pub const REGION_LABEL: &str = "label";
 
 /// Wire classes that can take a remark written after them on the same
-/// line (`Model::TakesInlineRemark` = Statement + Interface + Function
-/// + Variable; #693 — a tail remark on a function head or a local
-/// variable declaration trails that declaration).
+/// line (`Model::TakesInlineRemark` = Statement + Interface + Function +
+/// Variable; #693 — a tail remark on a function head or a local variable
+/// declaration trails that declaration).
 #[allow(dead_code)] // staged: consumed by the untagged orchestrator
 fn takes_inline_remark(class: &str) -> bool {
     // `class` may be the suffix or the full wire name; accept either.
