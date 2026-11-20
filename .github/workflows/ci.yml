@@ -105,6 +105,16 @@ jobs:
           # once lutaml/expressir#690's follow-up merges.
           ref: fix/tail-remark-placement-ruby
           path: expressir
+      # PR TEMPORARY (pairs with the checkout ref above): the vendored
+      # lane's ext must be THIS PR's engine, or the parity gates compare
+      # the new attachment against the old one and drift by design.
+      - name: Point the vendored ext at this PR's engine
+        run: |
+          ruby -e '
+            c = File.read("expressir/ext/expressir_core/Cargo.toml")
+            c = c.sub(/expressir = \{ git = [^}]+\}/, "expressir = { path = \"../../\" }")
+            File.write("expressir/ext/expressir_core/Cargo.toml", c)
+          '
       - name: Sync the split grammar (expressir#588)
         run: |
           for f in express-grammar.parg express_keywords.parg express_operators.parg express_remarks.parg express_literals.parg; do
