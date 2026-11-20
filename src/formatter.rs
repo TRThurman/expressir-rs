@@ -1532,7 +1532,7 @@ impl<'a> Formatter<'a> {
                 format!(
                     "{} :{}\n{}",
                     self.list_join(ptr, "labels", ", "),
-                    &label_remark,
+                    label_remark,
                     {
                         let rendered = self.child(ptr, "statement");
                         self.indent(&rendered)
@@ -1907,7 +1907,8 @@ impl<'a> Formatter<'a> {
             match label_remarks
                 .iter()
                 .find(|r| {
-                    r.get("source_offset").and_then(|o| o.as_u64())
+                    r.get("source_offset")
+                        .and_then(|o| o.as_u64())
                         .is_some_and(|o| o >= anchor && bound.is_none_or(|b| o < b))
                 })
                 .or_else(|| label_remarks.first())
