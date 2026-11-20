@@ -660,13 +660,15 @@ impl<'a> Formatter<'a> {
         // The enumeration items render inline inside ENUMERATION OF
         // (...) and never reach the dispatch, so their tagged
         // descriptions render here, after the TYPE (#694).
-        let items_ptr = format!("{ptr}/underlying_type/items");
-        let item_count = self.node(&items_ptr).as_array().map(Vec::len).unwrap_or(0);
-        for i in 0..item_count {
-            let item_ptr = format!("{items_ptr}/{i}");
-            for block in self.owner_tagged_blocks(&item_ptr) {
-                out.push(String::new());
-                out.push(block);
+        if !self.no_remarks {
+            let items_ptr = format!("{ptr}/underlying_type/items");
+            let item_count = self.node(&items_ptr).as_array().map(Vec::len).unwrap_or(0);
+            for i in 0..item_count {
+                let item_ptr = format!("{items_ptr}/{i}");
+                for block in self.owner_tagged_blocks(&item_ptr) {
+                    out.push(String::new());
+                    out.push(block);
+                }
             }
         }
         out.join("\n")
