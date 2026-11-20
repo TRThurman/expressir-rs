@@ -153,6 +153,12 @@ pub(crate) fn name_offset(window: &[u8], offset: usize, id: &str) -> Option<usiz
 fn walk(node: &Value, parent: Option<usize>, rows: &mut Vec<Entry>) {
     let Value::Object(map) = node else { return };
     let class = class_of(node).to_string();
+    // Attached remarks are not symbols and must not raise their owner's
+    // span: a tail remark's offset sits past the owner's END_ keyword
+    // (#693), and walking it as a child would extend the symbol by a line.
+    if class == "Expressir::Model::RemarkInfo" {
+        return;
+    }
     if !class.is_empty() {
         let start = map.get("source_offset").and_then(Value::as_u64);
         let end = map.get("source_end_offset").and_then(Value::as_u64);
