@@ -2939,7 +2939,7 @@ fn local_variable_target(
         .entries
         .iter()
         .filter(|e| {
-            (e.class == "Function" || e.class == "Procedure")
+            (e.class == "Function" || e.class == "Procedure" || e.class == "Entity")
                 && e.line < remark_line
                 && e.end_line.is_some_and(|end| end > remark_line)
         })
@@ -2951,35 +2951,38 @@ fn local_variable_target(
     let Some(scope_node) = root.pointer(&scope.ptr) else {
         return miss;
     };
-    let variables = scope_node
-        .get("variables")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let variable = match variables.iter().find(|v| {
-        v.get("id")
-            .and_then(|i| i.as_str())
-            .is_some_and(|id| names.contains(&id))
-    }) {
-        Some(v) => v,
-        None => return miss,
+    // Callable locals and entity attributes (explicit, derived, inverse)
+    // carry no source spans; the declared name is what a trailing remark
+    // can be resolved by (#693, #696).
+    let collections: &[(&str, &str)] = if scope.class == "Entity" {
+        &[
+            ("attributes", "attributes"),
+            ("derived_attributes", "derived_attributes"),
+            ("inverse_attributes", "inverse_attributes"),
+        ]
+    } else {
+        &[("variables", "variables")]
     };
-    // The VARIABLE node's own ptr: the index carries only scope entries;
-    // variables live at `<scope.ptr>/variables/<i>`.
-    let var_id = variable.get("id").and_then(|i| i.as_str());
-    let var_index = variables
-        .iter()
-        .position(|v| v.get("id").and_then(|i| i.as_str()) == var_id);
-    let Some(var_index) = var_index else {
-        return miss;
-    };
-    let ptr = format!("{}/variables/{}", scope.ptr, var_index);
-    // The variable nodes are not indexed (no spans), so the target points
-    // at the variable's own wire position.
-    if root.pointer(&ptr).is_none() {
-        return miss;
+    for (field, segment) in collections {
+        let children = scope_node
+            .get(*field)
+            .and_then(|v| v.as_array())
+            .cloned()
+            .unwrap_or_default();
+        let Some(pos) = children.iter().position(|v| {
+            v.get("id")
+                .and_then(|i| i.as_str())
+                .is_some_and(|id| names.contains(&id))
+        }) else {
+            continue;
+        };
+        let ptr = format!("{}/{}/{}", scope.ptr, segment, pos);
+        if root.pointer(&ptr).is_none() {
+            continue;
+        }
+        return (Some(ptr), Some("inline"), None);
     }
-    (Some(ptr), Some("inline"), None)
+    miss
 }
 
 /// `attach_untagged_remarks`: end-of-scope lines, body comments, then
@@ -3120,12 +3123,12 @@ fn find_body_comment_target(
     }
     let Some((enclosing, region_entries, _region_attr)) = statement_region_for(index, lines, line)
     else {
-        return (None, None, None);
+        return declaration_level_target(index, line);
     };
     // Ruby treats missing region entries as "not in a statement region"
-    // and hands the remark to the legacy nearest fallback instead.
+    // and hands the remark to the declaration-level lookup instead.
     let Some(region_entries) = region_entries else {
-        return (None, None, None);
+        return declaration_level_target(index, line);
     };
     let following = region_entries
         .iter()
@@ -3135,6 +3138,35 @@ fn find_body_comment_target(
         return (Some(following.ptr.clone()), Some("leading"), None);
     }
     (Some(enclosing.ptr.clone()), None, None)
+}
+
+/// A whole-line comment between declarations leads the next declaration:
+/// the nearest semantic node starting after the comment within the
+/// enclosing scope carries it with LEADING placement (#696). Attributes
+/// carry no source spans, so a comment inside an entity body finds
+/// nothing here and keeps the legacy attachment.
+fn declaration_level_target(
+    index: &WireIndex,
+    line: usize,
+) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
+    let miss = (None, None, None);
+    let scope = index
+        .spanning(line)
+        .into_iter()
+        .filter(|e| e.class != "ExpFile")
+        .min_by_key(|e| (e.end_line.unwrap_or(0) - e.line, e.line));
+    let Some(scope) = scope else {
+        return miss;
+    };
+    let end = scope.end_line.unwrap_or(line);
+    let following = index
+        .semantic()
+        .filter(|e| e.line > line && e.line <= end)
+        .min_by_key(|e| e.line);
+    match following {
+        Some(f) => (Some(f.ptr.clone()), Some("leading"), None),
+        None => miss,
+    }
 }
 
 /// `add_remark` with a source offset (tail-flavored, no placement).
