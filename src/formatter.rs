@@ -334,7 +334,7 @@ impl<'a> Formatter<'a> {
     fn dispatch(&mut self, ptr: &str) -> String {
         let node = self.node(ptr).clone();
         let body = self.format_body(ptr, &node);
-        self.place_remarks(body, &node)
+        self.place_remarks(body, ptr, &node)
     }
 
     fn child(&mut self, base: &str, field: &str) -> String {
@@ -657,6 +657,18 @@ impl<'a> Formatter<'a> {
             out.push(self.indent(&remark));
         }
         out.push(format!("END_TYPE;{}", self.format_end_scope_remark(node)));
+        // The enumeration items render inline inside ENUMERATION OF
+        // (...) and never reach the dispatch, so their tagged
+        // descriptions render here, after the TYPE (#694).
+        let items_ptr = format!("{ptr}/underlying_type/items");
+        let item_count = self.node(&items_ptr).as_array().map(Vec::len).unwrap_or(0);
+        for i in 0..item_count {
+            let item_ptr = format!("{items_ptr}/{i}");
+            for block in self.owner_tagged_blocks(&item_ptr) {
+                out.push(String::new());
+                out.push(block);
+            }
+        }
         out.join("\n")
     }
 
@@ -1032,7 +1044,16 @@ impl<'a> Formatter<'a> {
         if rule_context {
             return remarks
                 .iter()
-                .map(|r| format!("--\"{tag}\" {r}"))
+                .map(|r| {
+                    if r.contains('\n') {
+                        // A multi-line remark cannot ride the `--` tail
+                        // form: its continuation lines would leak as
+                        // bare source text the parser rejects (#691).
+                        format!("(*\"{tag}\"\n{r}\n*)")
+                    } else {
+                        format!("--\"{tag}\" {r}")
+                    }
+                })
                 .collect::<Vec<_>>()
                 .join("\n");
         }
@@ -1705,16 +1726,21 @@ impl<'a> Formatter<'a> {
         } else {
             text.to_string()
         };
-        if remark.tail_annotation() {
+        // A multi-line remark always renders as a block: the `--` /
+        // `---` tail forms would leak its continuation lines into the
+        // source as bare text the parser rejects (#691).
+        if text.contains('\n') {
+            if remark.embedded_annotation() {
+                format!("(**\n{formatted}\n**)")
+            } else {
+                format!("(*\n{formatted}\n*)")
+            }
+        } else if remark.tail_annotation() {
             format!("--- {formatted}")
         } else if remark.tail() {
             format!("-- {formatted}")
-        } else if remark.embedded_annotation() && text.contains('\n') {
-            format!("(**\n{formatted}\n*)")
         } else if remark.embedded_annotation() {
             format!("(** {formatted} *)")
-        } else if text.contains('\n') {
-            format!("(*\n{formatted}\n*)")
         } else {
             format!("(* {formatted} *)")
         }
@@ -1728,6 +1754,11 @@ impl<'a> Formatter<'a> {
         let Some(remark) = remark else {
             return String::new();
         };
+        // Placement-carrying remarks render through their own paths
+        // (leading above the node); this appends the legacy tail.
+        if remark.leading() {
+            return String::new();
+        }
         let Some(text) = remark.text.filter(|t| !t.is_empty()) else {
             return String::new();
         };
@@ -1736,7 +1767,16 @@ impl<'a> Formatter<'a> {
         } else {
             text.to_string()
         };
-        if remark.tail_annotation() {
+        if text.contains('\n') {
+            // A multi-line remark cannot ride the `--` tail forms: its
+            // continuation lines would leak as bare source text (#691).
+            // The block form keeps them inside a remark opener.
+            if remark.embedded_annotation() {
+                format!(" (**\n{formatted}\n**)")
+            } else {
+                format!(" (*\n{formatted}\n*)")
+            }
+        } else if remark.tail_annotation() {
             format!(" --- {formatted}")
         } else if remark.tail() {
             format!(" -- {formatted}")
@@ -1784,6 +1824,9 @@ impl<'a> Formatter<'a> {
         let mut remarks: Vec<Remark> = arr(node, "untagged_remarks")
             .iter()
             .map(Remark::from)
+            // Leading remarks render above the node (place_remarks);
+            // emitting them in the preamble would write them twice.
+            .filter(|r| !r.leading())
             .filter(|r| r.text.map(|t| !t.is_empty()).unwrap_or(false))
             .collect();
         if remarks.is_empty() {
@@ -2039,7 +2082,12 @@ impl<'a> Formatter<'a> {
 
     // ---- placement glue (Formatter#format's place_remarks) ----
 
-    fn place_remarks(&mut self, mut formatted: String, node: &Value) -> String {
+    fn place_remarks(
+        &mut self,
+        mut formatted: String,
+        ptr: &str,
+        node: &Value,
+    ) -> String {
         let inline = self.formatted_inline_remarks(node, &|r: &Remark| r.region.is_none());
         if !inline.is_empty() {
             formatted.push_str(&inline);
@@ -2051,6 +2099,17 @@ impl<'a> Formatter<'a> {
                 None => format!("{formatted}{opener}"),
             };
         }
+        // The owner's own tagged descriptions (`(*"path" text *)`, the
+        // #679 storage contract) render as blocks after the declaration
+        // (#694) — every owner class except the SCHEMA (its own emitter
+        // renders them inside the body) and the EnumerationItem (inline
+        // in ENUMERATION OF; the TYPE renders its items).
+        if !self.no_remarks && !is_owner_tagged_skip(node) {
+            for block in self.owner_tagged_blocks(ptr) {
+                formatted.push_str("\n\n");
+                formatted.push_str(&block);
+            }
+        }
         let leading = self.format_leading_statement_remarks(node);
         if leading.is_empty() {
             formatted
@@ -2060,6 +2119,38 @@ impl<'a> Formatter<'a> {
             lines.join("\n")
         }
     }
+
+    // The owner's tagged remark texts (`remarks` string array) as WG12
+    // blocks tagged with the node's schema-relative path — the same
+    // blocks the RemarkItem emitter uses.
+    fn owner_tagged_blocks(&self, ptr: &str) -> Vec<String> {
+        let tag = node_path(self.ctx, ptr).unwrap_or_default();
+        if tag.is_empty() {
+            // A node whose path does not resolve renders its texts
+            // through the remark-item channel instead — an empty tag
+            // would write a `(*""` block.
+            return Vec::new();
+        }
+        arr(self.node(ptr), "remarks")
+            .iter()
+            .filter_map(|r| r.as_str())
+            .filter(|r| !r.is_empty())
+            .map(|r| {
+                if r.contains('\n') {
+                    format!("(*\"{tag}\"\n{r}\n*)")
+                } else {
+                    format!("(*\"{tag}\" {r} *)")
+                }
+            })
+            .collect()
+    }
+}
+
+// Owners whose tagged descriptions another emitter renders: the SCHEMA
+// carries its own inside the body, the EnumerationItem's belong to its
+// TYPE, and the RemarkItem renders itself (#694).
+fn is_owner_tagged_skip(node: &Value) -> bool {
+    is(node, "Schema") || is(node, "EnumerationItem") || is(node, "RemarkItem")
 }
 
 // ---------------------------------------------------------------------
