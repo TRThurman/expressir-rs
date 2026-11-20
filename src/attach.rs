@@ -2371,15 +2371,20 @@ pub const PLACEMENT_INLINE: &str = "inline";
 pub const REGION_OPENER: &str = "opener";
 pub const REGION_ELSE: &str = "else";
 pub const REGION_OTHERWISE: &str = "otherwise";
+pub const REGION_LABEL: &str = "label";
 
 /// Wire classes that can take a remark written after them on the same
-/// line (`Model::TakesInlineRemark` = Statement + Interface).
+/// line (`Model::TakesInlineRemark` = Statement + Interface + Function
+/// + Variable; #693 — a tail remark on a function head or a local
+/// variable declaration trails that declaration).
 #[allow(dead_code)] // staged: consumed by the untagged orchestrator
 fn takes_inline_remark(class: &str) -> bool {
     // `class` may be the suffix or the full wire name; accept either.
     let has_ns = class.contains("::Statements::");
     let is_interface = class == "Interface" || class.ends_with("::Interface");
-    has_ns || is_interface
+    let is_function = class == "Function" || class.ends_with("::Function");
+    let is_variable = class == "Variable" || class.ends_with("::Variable");
+    has_ns || is_interface || is_function || is_variable
 }
 
 /// Executable-statement owners for region lookup (`Model::Statement`
@@ -2394,10 +2399,13 @@ fn is_statement_or_body_owner_full(full_class: &str) -> bool {
 use regex::Regex;
 use std::sync::LazyLock;
 
-/// `MID_KEYWORD_REGIONS`: line-head ELSE / OTHERWISE.
+/// `MID_KEYWORD_REGIONS`: line-head ELSE / OTHERWISE / a bare case label
+/// whose action starts on the next line (#693).
 static MID_KEYWORD_ELSE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\AELSE\b").unwrap());
 static MID_KEYWORD_OTHERWISE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\AOTHERWISE\b").unwrap());
+static MID_KEYWORD_LABEL: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\A(?:\d+|[A-Za-z_]\w*)\s*:\s*\z").unwrap());
 
 /// `CLOSING_KEYWORDS` — which closing keyword ends which region of
 /// which owner. Ordered like the Ruby hash (first match wins).
@@ -2803,17 +2811,20 @@ fn inline_target(
     remark_line: usize,
     remark_position: usize,
 ) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
-    let started_here: Vec<&IndexEntry> = index
-        .starting_at(remark_line)
-        .into_iter()
+    // The candidate pool carries both the nodes STARTING on the line (the
+    // remark trails a statement's own text) and the nodes ENDING on it
+    // (`END_IF; -- why` trails the statement that just closed — #693).
+    let mut pool: Vec<&IndexEntry> = index.starting_at(remark_line);
+    pool.extend(index.ending_at(remark_line));
+    let started_here: Vec<&IndexEntry> = pool
+        .iter()
         .filter(|e| {
             takes_inline_remark(&e.full_class)
+                && e.line == remark_line
                 && e.offset.is_some_and(|o| o < remark_position as u64)
         })
-        .collect();
-    if started_here.is_empty() {
-        return (None, None, None);
-    }
+        .copied()
+        .collect::<Vec<_>>();
     let single_line = started_here
         .iter()
         .filter(|e| e.end_line == Some(remark_line))
@@ -2825,21 +2836,24 @@ fn inline_target(
     let began = match (single_line, opener) {
         (Some(a), Some(b)) => {
             if a.offset.unwrap_or(0) >= b.offset.unwrap_or(0) {
-                Some(a)
+                Some(*a)
             } else {
-                Some(b)
+                Some(*b)
             }
         }
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
+        (Some(a), None) => Some(*a),
+        (None, Some(b)) => Some(*b),
         (None, None) => None,
     };
     let owner = match began {
-        Some(b) => Some(*b),
-        None => started_here
+        Some(b) => Some(b),
+        // `closing_owner`: the pool's ENDING nodes — a statement that
+        // opened earlier and closes on the remark's line.
+        None => pool
             .iter()
             .filter(|e| {
-                e.end_line == Some(remark_line)
+                takes_inline_remark(&e.full_class)
+                    && e.end_line == Some(remark_line)
                     && e.line < remark_line
                     && e.offset.is_some_and(|o| o < remark_position as u64)
             })
@@ -2873,6 +2887,8 @@ fn mid_keyword_inline_target(
         ("If", REGION_ELSE)
     } else if MID_KEYWORD_OTHERWISE.is_match(head) {
         ("Case", REGION_OTHERWISE)
+    } else if MID_KEYWORD_LABEL.is_match(head) {
+        ("Case", REGION_LABEL)
     } else {
         return (None, None, None);
     };
@@ -2889,6 +2905,81 @@ fn mid_keyword_inline_target(
         Some(entry) => (Some(entry.ptr.clone()), Some("inline"), Some(region)),
         None => (None, None, None),
     }
+}
+
+#[allow(clippy::type_complexity)]
+static LOCAL_VAR_NAME: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"([A-Za-z_]\w*)\s*(?::|,)").unwrap());
+
+/// A remark on a LOCAL variable declaration line — `v : INTEGER; -- why`.
+/// Local variables carry no source spans, so the line's declared names are
+/// matched against the enclosing scope's variables (#693). A multi-name
+/// line (`a, b : INTEGER;`) matches any of its names.
+#[allow(clippy::type_complexity)]
+fn local_variable_target(
+    root: &Value,
+    index: &WireIndex,
+    lines: &[&str],
+    remark_line: usize,
+) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
+    let content = lines.get(remark_line - 1).copied().unwrap_or("");
+    let Some(opener) = content.find("--") else {
+        return (None, None, None);
+    };
+    let names: Vec<&str> = LOCAL_VAR_NAME
+        .captures_iter(&content[..opener])
+        .filter_map(|c| c.get(1))
+        .map(|m| m.as_str())
+        .collect();
+    if names.is_empty() {
+        return (None, None, None);
+    }
+    let miss = (None, None, None);
+    let scope = match index
+        .entries
+        .iter()
+        .filter(|e| {
+            (e.class == "Function" || e.class == "Procedure")
+                && e.line < remark_line
+                && e.end_line.is_some_and(|end| end > remark_line)
+        })
+        .min_by_key(|e| e.end_line.unwrap_or(0) - e.line)
+    {
+        Some(s) => s,
+        None => return miss,
+    };
+    let Some(scope_node) = root.pointer(&scope.ptr) else {
+        return miss;
+    };
+    let variables = scope_node
+        .get("variables")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let variable = match variables.iter().find(|v| {
+        v.get("id")
+            .and_then(|i| i.as_str())
+            .is_some_and(|id| names.contains(&id))
+    }) {
+        Some(v) => v,
+        None => return miss,
+    };
+    // The VARIABLE node's own ptr: the index carries only scope entries;
+    // variables live at `<scope.ptr>/variables/<i>`.
+    let var_id = variable.get("id").and_then(|i| i.as_str());
+    let var_index = variables
+        .iter()
+        .position(|v| v.get("id").and_then(|i| i.as_str()) == var_id);
+    let Some(var_index) = var_index else {
+        return miss;
+    };
+    let ptr = format!("{}/variables/{}", scope.ptr, var_index);
+    // The variable nodes are not indexed (no spans), so the target points
+    // at the variable's own wire position.
+    if root.pointer(&ptr).is_none() {
+        return miss;
+    }
+    (Some(ptr), Some("inline"), None)
 }
 
 /// `attach_untagged_remarks`: end-of-scope lines, body comments, then
@@ -3009,12 +3100,19 @@ fn find_body_comment_target(
         if target.is_some() {
             return (target, placement, region);
         }
-        // Ruby returns `mid if mid` where mid is always an array —
-        // truthy even when empty — so an inline remark whose inline and
-        // mid-keyword targets both fail NEVER reaches the statement
-        // region: it goes straight to the legacy nearest fallback.
         let mid = mid_keyword_inline_target(index, lines, line);
-        return mid;
+        if mid.0.is_some() {
+            return mid;
+        }
+        // A remark on a LOCAL variable declaration line (`v : INTEGER; -- why`)
+        // trails a declaration whose nodes carry no source spans; resolved
+        // by the declared name (#693). The ruby lane gates this step on
+        // `mid.first` (the miss sentinel array is truthy as a whole), which
+        // lets the flow continue into the closing/region fallbacks below.
+        let lvt = local_variable_target(root, index, lines, line);
+        if lvt.0.is_some() {
+            return lvt;
+        }
     }
     let closing = closing_region_target(root, index, lines, line);
     if closing.0.is_some() {

@@ -1527,10 +1527,18 @@ impl<'a> Formatter<'a> {
                 out.push("END_CASE;".to_string());
                 out.join("\n")
             }
-            "CaseAction" => format!("{} :\n{}", self.list_join(ptr, "labels", ", "), {
-                let rendered = self.child(ptr, "statement");
-                self.indent(&rendered)
-            }),
+            "CaseAction" => {
+                let label_remark = self.case_label_remark(ptr);
+                format!(
+                    "{} :{}\n{}",
+                    self.list_join(ptr, "labels", ", "),
+                    &label_remark,
+                    {
+                        let rendered = self.child(ptr, "statement");
+                        self.indent(&rendered)
+                    }
+                )
+            }
             "Compound" => {
                 let mut out = vec!["BEGIN".to_string()];
                 if !arr(node, "statements").is_empty() {
@@ -1841,6 +1849,84 @@ impl<'a> Formatter<'a> {
             .map(|r| self.format_untagged_remark(&r))
             .filter(|t| !t.is_empty())
             .collect()
+    }
+
+    // A remark trailing a bare case label (`1 : -- why`, the action on the
+    // next line) is owned by the CASE with the label region; it belongs
+    // back on the label line of the action it precedes (#693). Matched by
+    // offset when the remark carries one; otherwise by order — the k-th
+    // label remark precedes the k-th action.
+    fn case_label_remark(&self, ptr: &str) -> String {
+        if self.no_remarks {
+            return String::new();
+        }
+        let Some((case_ptr, action_index)) = ptr
+            .rsplit_once("/actions/")
+            .map(|(case, idx)| (case.to_string(), idx.parse::<usize>().ok()))
+            .map(|(case, idx)| (case, idx.unwrap_or(usize::MAX)))
+        else {
+            return String::new();
+        };
+        let case_node = self.node(&case_ptr);
+        let label_remarks: Vec<&Value> = arr(case_node, "untagged_remarks")
+            .iter()
+            .filter(|r| {
+                r.get("placement").and_then(|p| p.as_str()) == Some("inline")
+                    && r.get("region").and_then(|g| g.as_str()) == Some("label")
+            })
+            .collect();
+        if label_remarks.is_empty() {
+            return String::new();
+        }
+        let remark = if label_remarks
+            .first()
+            .and_then(|r| r.get("source_offset"))
+            .is_some()
+        {
+            let anchor = self
+                .node(ptr)
+                .get("labels")
+                .and_then(|l| l.as_array())
+                .and_then(|l| l.first())
+                .and_then(|l| l.get("source_offset"))
+                .and_then(|o| o.as_u64());
+            let Some(anchor) = anchor else {
+                return String::new();
+            };
+            let bound = (action_index + 1..)
+                .map(|i| self.node(&format!("{case_ptr}/actions/{i}")))
+                .take_while(|n| !n.is_null())
+                .filter_map(|n| {
+                    n.get("labels")
+                        .and_then(|l| l.as_array())
+                        .and_then(|l| l.first())
+                        .and_then(|l| l.get("source_offset"))
+                        .and_then(|o| o.as_u64())
+                })
+                .min();
+            match label_remarks
+                .iter()
+                .find(|r| {
+                    r.get("source_offset").and_then(|o| o.as_u64())
+                        .is_some_and(|o| o >= anchor && bound.is_none_or(|b| o < b))
+                })
+                .or_else(|| label_remarks.first())
+            {
+                Some(r) => *r,
+                None => return String::new(),
+            }
+        } else {
+            match label_remarks.get(action_index) {
+                Some(r) => *r,
+                None => return String::new(),
+            }
+        };
+        let formatted = self.format_untagged_remark(&Remark::from(remark));
+        if formatted.is_empty() {
+            String::new()
+        } else {
+            format!(" {formatted}")
+        }
     }
 
     fn format_mid_keyword_remarks(&self, node: &Value, region: &str) -> String {
