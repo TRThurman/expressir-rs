@@ -100,10 +100,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: lutaml/expressir
-          # PR TEMPORARY: the #693 tail-remark attachment changes land in
-          # the ruby lane and this repo's ports together; revert to main
-          # once lutaml/expressir#690's follow-up merges.
-          ref: fix/tail-remark-placement-ruby
           path: expressir
       - name: Sync the split grammar (expressir#588)
         run: |
