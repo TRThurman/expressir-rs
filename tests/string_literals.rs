@@ -36,9 +36,7 @@ fn string_literals_round_trip() {
     assert_eq!(value_of("tail3"), "a''");
 
     let text = expressir::formatter::format(&wire, false);
-    for literal in [
-        "' '", "' a'", "''", "'it''s'", "''''", "'''a'", "'a'''",
-    ] {
+    for literal in ["' '", "' a'", "''", "'it''s'", "''''", "'''a'", "'a'''"] {
         assert!(text.contains(literal), "{literal} not written:\n{text}");
     }
     assert!(text.contains(":= 'a' + 'b';"), "adjacent literals:\n{text}");
