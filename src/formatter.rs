@@ -1806,8 +1806,9 @@ impl<'a> Formatter<'a> {
             return String::new();
         };
         // Placement-carrying remarks render through their own paths
-        // (leading above the node); this appends the legacy tail.
-        if remark.leading() {
+        // (leading above the node, inline after the statement text);
+        // this appends the legacy tail.
+        if remark.placement.is_some() {
             return String::new();
         }
         let Some(text) = remark.text.filter(|t| !t.is_empty()) else {
@@ -1868,7 +1869,13 @@ impl<'a> Formatter<'a> {
                 })
             })
             .collect();
-        lines.join("\n")
+        if lines.is_empty() {
+            String::new()
+        } else {
+            // The first remark rides the END_ line; the rest follow
+            // below it.
+            format!(" {}", lines.join("\n"))
+        }
     }
 
     fn format_preamble_remarks(&self, ptr: &str, indent_str: &str) -> Option<String> {
