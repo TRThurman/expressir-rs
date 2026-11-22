@@ -195,11 +195,16 @@ pub fn format_flavored(root: &Value, path: &str, options_json: &str) -> Result<S
         _ => Flavor::Source,
     };
     let no_remarks = options.get("no_remarks").and_then(Value::as_bool) == Some(true);
+    let keep = options
+        .get("keep_untagged_remarks")
+        .and_then(Value::as_bool)
+        == Some(true);
     let head_only = options.get("head_only").and_then(Value::as_bool) == Some(true);
     let ctx = PathCtx::new(root);
     let mut f = Formatter {
         ctx: &ctx,
         no_remarks,
+        keep_untagged_remarks: keep,
         width: 2,
         flavor,
         head_only,
@@ -222,10 +227,18 @@ pub fn format_flavored(root: &Value, path: &str, options_json: &str) -> Result<S
 
 /// Renders the wire (an ExpFile) to EXPRESS text.
 pub fn format(root: &Value, no_remarks: bool) -> String {
+    format_with_keep(root, no_remarks, false)
+}
+
+/// The `no_remarks` + `keep_untagged_remarks` pair (#703): the plain
+/// face strips the annotation blocks but keeps the source's own
+/// comments when the flag is set.
+pub fn format_with_keep(root: &Value, no_remarks: bool, keep_untagged_remarks: bool) -> String {
     let ctx = PathCtx::new(root);
     let mut f = Formatter {
         ctx: &ctx,
         no_remarks,
+        keep_untagged_remarks,
         width: 2,
         flavor: Flavor::Source,
         head_only: false,
@@ -247,6 +260,9 @@ pub fn format(root: &Value, no_remarks: bool) -> String {
 struct Formatter<'a> {
     ctx: &'a PathCtx<'a>,
     no_remarks: bool,
+    /// The plain face keeps the source's untagged comments when set
+    /// (#703).
+    keep_untagged_remarks: bool,
     /// The nesting width (the ruby self.indent() — PrettyFormatter
     /// overrides it with its configured width).
     width: usize,
@@ -652,7 +668,7 @@ impl<'a> Formatter<'a> {
     /// carries no text (the WG12 `-- IP1:` markers). The attach stores
     /// the proposition's texts on its remark item.
     fn format_informal_propositions(&mut self, ptr: &str) -> Vec<String> {
-        if self.no_remarks {
+        if self.no_remarks && !self.keep_untagged_remarks {
             return Vec::new();
         }
         let items_ptr = format!("{ptr}/informal_propositions");
@@ -1798,7 +1814,7 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_inline_tail_remark(&self, node: &Value) -> String {
-        if self.no_remarks {
+        if self.no_remarks && !self.keep_untagged_remarks {
             return String::new();
         }
         let remark = arr(node, "untagged_remarks").first().map(Remark::from);
@@ -1840,7 +1856,7 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_end_scope_remark(&self, node: &Value) -> String {
-        if self.no_remarks {
+        if self.no_remarks && !self.keep_untagged_remarks {
             return String::new();
         }
         // Every legacy (unplaced) tail remark belongs after the END_*
@@ -1879,7 +1895,7 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_preamble_remarks(&self, ptr: &str, indent_str: &str) -> Option<String> {
-        if self.no_remarks {
+        if self.no_remarks && !self.keep_untagged_remarks {
             return None;
         }
         let node = self.node(ptr);
@@ -1946,7 +1962,7 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_trailing_region_remarks(&self, node: &Value, region: &str) -> Vec<String> {
-        if self.no_remarks {
+        if self.no_remarks && !self.keep_untagged_remarks {
             return Vec::new();
         }
         arr(node, "untagged_remarks")
@@ -2074,7 +2090,7 @@ impl<'a> Formatter<'a> {
     /// untagged text (add_remark dual-store), so "genuinely tagged" is
     /// derivable only by multiset-subtracting the untagged texts.
     fn format_block_end_remarks(&mut self, ptr: &str, node: &Value) -> Vec<String> {
-        if self.no_remarks {
+        if self.no_remarks && !self.keep_untagged_remarks {
             return Vec::new();
         }
         let untagged: Vec<Remark> = arr(node, "untagged_remarks")
@@ -2231,6 +2247,7 @@ pub struct PrettyOptions {
     pub provenance_name: String,
     pub provenance_version: String,
     pub no_remarks: bool,
+    pub keep_untagged_remarks: bool,
 }
 
 impl Default for PrettyOptions {
@@ -2242,6 +2259,7 @@ impl Default for PrettyOptions {
             provenance_name: "Expressir".to_string(),
             provenance_version: String::new(),
             no_remarks: false,
+            keep_untagged_remarks: false,
         }
     }
 }
@@ -2281,6 +2299,7 @@ pub fn pretty_format(root: &Value, path: &str, options_json: &str) -> Result<Str
     let mut f = Formatter {
         ctx: &ctx,
         no_remarks: options.no_remarks,
+        keep_untagged_remarks: options.keep_untagged_remarks,
         width: options.indent,
         flavor: Flavor::Source,
         head_only: false,
