@@ -692,6 +692,12 @@ impl<'a> Formatter<'a> {
                 out.push(format!("{label}\n{}", self.indent(&body)));
             }
         }
+        // A comment after the last attribute or rule closes the entity.
+        for region in ["attributes", "where_rules"] {
+            for remark in self.format_trailing_region_remarks(node, region) {
+                out.push(self.indent(&remark));
+            }
+        }
         for remark in self.format_informal_propositions(ptr) {
             out.push(self.indent(&remark));
         }
@@ -779,6 +785,12 @@ impl<'a> Formatter<'a> {
         if !arr(node, "where_rules").is_empty() {
             let body = self.list_join(ptr, "where_rules", "\n");
             out.push(format!("WHERE\n{}", self.indent(&body)));
+        }
+        // A comment after the definition or the last rule closes the type.
+        for region in ["underlying_type", "where_rules"] {
+            for remark in self.format_trailing_region_remarks(node, region) {
+                out.push(self.indent(&remark));
+            }
         }
         for remark in self.format_remark_items_children(ptr) {
             out.push(self.indent(&remark));
@@ -2015,6 +2027,8 @@ impl<'a> Formatter<'a> {
             // every legacy tail remark renders after the END_ keyword;
             // emitting either in the preamble would write them twice.
             .filter(|r| !r.leading())
+            // Trailing remarks render before the closing keyword.
+            .filter(|r| r.placement != Some("trailing"))
             .filter(|r| !(r.placement.is_none() && r.tail_like()))
             .filter(|r| r.text.map(|t| !t.is_empty()).unwrap_or(false))
             .collect();
@@ -2718,6 +2732,11 @@ impl PrettyFormatter {
                     .collect();
                 out.push(keyword.to_string());
                 out.push(self.indent(&rendered.join("\n")));
+            }
+        }
+        for region in ["attributes", "where_rules"] {
+            for remark in f.format_trailing_region_remarks(node, region) {
+                out.push(self.indent(&remark));
             }
         }
         out.push(format!("END_ENTITY;{}", f.format_end_scope_remark(node)));
