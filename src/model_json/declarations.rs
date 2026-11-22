@@ -67,6 +67,10 @@ pub(crate) struct Declarations {
     functions: Vec<Value>,
     rules: Vec<Value>,
     procedures: Vec<Value>,
+    /// The declaration ids in the order of the source (#711). The
+    /// schema emission writes it into the wire; the same struct also
+    /// fills algorithm heads, whose wires must stay free of the key.
+    pub(crate) order: Vec<Value>,
 }
 
 pub(crate) fn apply(map: &mut Map<String, Value>, decls: &Declarations) {
@@ -112,6 +116,9 @@ fn dispatch_declaration(arena: &AstArena, declaration: &AstNode, decls: &mut Dec
         };
         if let Some(v) = built.as_mut() {
             attach_offset(arena, &value, v);
+            if let Some(id) = v.get("id").and_then(Value::as_str) {
+                decls.order.push(Value::String(id.to_string()));
+            }
             match key.as_str() {
                 "entityDecl" => decls.entities.push(built.take().expect("built")),
                 "typeDecl" => decls.types.push(built.take().expect("built")),
