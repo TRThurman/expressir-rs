@@ -2375,8 +2375,10 @@ pub const REGION_LABEL: &str = "label";
 
 /// Wire classes that can take a remark written after them on the same
 /// line (`Model::TakesInlineRemark` = Statement + Interface + Function +
-/// Variable; #693 — a tail remark on a function head or a local variable
-/// declaration trails that declaration).
+/// Variable + WhereRule + EnumerationItem; #693 — a tail remark on a
+/// function head or a local variable declaration trails that
+/// declaration; a tail remark on the line of a WHERE rule or of an
+/// enumeration item trails the rule or the item).
 #[allow(dead_code)] // staged: consumed by the untagged orchestrator
 fn takes_inline_remark(class: &str) -> bool {
     // `class` may be the suffix or the full wire name; accept either.
@@ -2384,7 +2386,9 @@ fn takes_inline_remark(class: &str) -> bool {
     let is_interface = class == "Interface" || class.ends_with("::Interface");
     let is_function = class == "Function" || class.ends_with("::Function");
     let is_variable = class == "Variable" || class.ends_with("::Variable");
-    has_ns || is_interface || is_function || is_variable
+    let is_where_rule = class == "WhereRule" || class.ends_with("::WhereRule");
+    let is_enumeration_item = class == "EnumerationItem" || class.ends_with("::EnumerationItem");
+    has_ns || is_interface || is_function || is_variable || is_where_rule || is_enumeration_item
 }
 
 /// Executable-statement owners for region lookup (`Model::Statement`

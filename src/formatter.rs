@@ -766,8 +766,13 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_type(&mut self, ptr: &str, node: &Value) -> String {
+        let last_item = arr(node.get("underlying_type").unwrap_or(&Value::Null), "items")
+            .last()
+            .filter(|item| is(item, "DataTypes::EnumerationItem"))
+            .map(|item| self.formatted_inline_remarks(item, &|r: &Remark| r.region.is_none()))
+            .unwrap_or_default();
         let mut out = vec![format!(
-            "TYPE {} = {};",
+            "TYPE {} = {};{last_item}",
             id_of(node).unwrap_or_default(),
             self.child(ptr, "underlying_type")
         )];
@@ -1088,8 +1093,28 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_where_rule(&mut self, ptr: &str, node: &Value) -> String {
-        let label = id_of(node).map(|id| format!("{id}: ")).unwrap_or_default();
-        let mut out = format!("{label}{};", self.child(ptr, "expression"));
+        // A remark after the label (`wr1 : -- why`, the expression on the
+        // next line) stays on the label's line: place_remarks puts it at
+        // the end of the first line, so the expression goes on a line of
+        // its own.
+        let after_label = !self
+            .formatted_inline_remarks(node, &|r: &Remark| r.opener())
+            .is_empty();
+        let expression = self.child(ptr, "expression");
+        // A rule without a label has no first line for that remark. When
+        // another remark ends the rule's line, the two would share it and
+        // the second would become part of the first: the first line is
+        // left empty and takes the remark, on a line of its own.
+        let own_line = after_label
+            && !self
+                .formatted_inline_remarks(node, &|r: &Remark| r.region.is_none())
+                .is_empty();
+        let mut out = match (id_of(node), after_label) {
+            (Some(id), true) => format!("{id}:\n{};", self.indent(&expression)),
+            (Some(id), false) => format!("{id}: {expression};"),
+            (None, _) if own_line => format!("\n{expression};"),
+            (None, _) => format!("{expression};"),
+        };
         for remark in self.format_remark_items_children(ptr) {
             out.push('\n');
             out.push_str(&remark);
@@ -1339,10 +1364,27 @@ impl<'a> Formatter<'a> {
     fn indent_items(&mut self, ptr: &str, field: &str) -> String {
         let item_indent = " ".repeat("(".len());
         let count = arr(self.node(ptr), field).len();
+        // A remark that follows an item on its line is written after the
+        // comma. The remark of the last item of an ENUMERATION is written
+        // after the `;` of its TYPE (`format_type`): before it, a tail
+        // remark would take the `)` and the `;` with it.
         let items = (0..count)
-            .map(|i| self.child(ptr, &format!("{field}/{i}")))
+            .map(|i| {
+                let item_ptr = format!("{field}/{i}");
+                let text = self.child(ptr, &item_ptr);
+                if i + 1 == count {
+                    return text;
+                }
+                let item = self.node(&format!("{ptr}/{item_ptr}")).clone();
+                let remark = if is(&item, "DataTypes::EnumerationItem") {
+                    self.formatted_inline_remarks(&item, &|r: &Remark| r.region.is_none())
+                } else {
+                    String::new()
+                };
+                format!("{text},{remark}")
+            })
             .collect::<Vec<_>>()
-            .join(&format!(",\n{item_indent}"));
+            .join(&format!("\n{item_indent}"));
         self.indent(&format!("({items})"))
     }
 
@@ -2230,13 +2272,22 @@ impl<'a> Formatter<'a> {
     // ---- placement glue (Formatter#format's place_remarks) ----
 
     fn place_remarks(&mut self, mut formatted: String, ptr: &str, node: &Value) -> String {
-        let inline = self.formatted_inline_remarks(node, &|r: &Remark| r.region.is_none());
+        // An enumeration item is followed by a comma or by the `)` and
+        // `;` of its TYPE: its list and its TYPE write the remark after
+        // those (`indent_items`, `format_type`).
+        let inline = if is(node, "DataTypes::EnumerationItem") {
+            String::new()
+        } else {
+            self.formatted_inline_remarks(node, &|r: &Remark| r.region.is_none())
+        };
         if !inline.is_empty() {
             formatted.push_str(&inline);
         }
         let opener = self.formatted_inline_remarks(node, &|r: &Remark| r.opener());
         if !opener.is_empty() {
             formatted = match formatted.split_once('\n') {
+                // An empty first line takes the remark as a line of its own.
+                Some(("", rest)) => format!("{}\n{rest}", opener.trim_start()),
                 Some((head, rest)) => format!("{head}{opener}\n{rest}"),
                 None => format!("{formatted}{opener}"),
             };
