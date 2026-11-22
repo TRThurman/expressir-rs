@@ -2463,6 +2463,18 @@ static CLOSING_KEYWORDS: LazyLock<Vec<(Regex, &'static str, &'static str)>> = La
             "Rule",
             "where_rules",
         ),
+        // END_ENTITY and END_TYPE close the WHERE section when the
+        // declaration has one.
+        (
+            Regex::new(r"(?i)\AEND_ENTITY\b").unwrap(),
+            "Entity",
+            "where_rules",
+        ),
+        (
+            Regex::new(r"(?i)\AEND_TYPE\b").unwrap(),
+            "Type",
+            "where_rules",
+        ),
     ]
 });
 
@@ -2734,16 +2746,26 @@ fn closing_region_target(
     index: &WireIndex,
     lines: &[&str],
     line: usize,
+    own_line: bool,
 ) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
     let Some((owner_class, region, keyword_line)) = closing_keyword_after(lines, line) else {
         return (None, None, None);
     };
+    // Only a comment on a line of its own closes an ENTITY or a TYPE: one
+    // at the end of a code line belongs to the attribute, rule or item
+    // written on that line.
+    if !own_line && matches!(owner_class, "Entity" | "Type") {
+        return (None, None, None);
+    }
     let map = active_scope_map(lines);
     // The map is 0-indexed by line: entry k holds line k+1.
     let Some(active) = map.get(keyword_line - 1).copied().flatten() else {
         return (None, None, None);
     };
-    if active.0 != owner_class {
+    // ENTITY / TYPE openers are tracked with the empty class; the class
+    // check on the node found at the opener line tells the two apart.
+    let untracked = active.0.is_empty() && matches!(owner_class, "Entity" | "Type");
+    if active.0 != owner_class && !untracked {
         return (None, None, None);
     }
     let opener_line = active.1;
@@ -2785,6 +2807,12 @@ fn closing_region_target(
                 region
             }
         }
+        // END_ENTITY closes the attributes, END_TYPE the definition, when
+        // the declaration has no WHERE section.
+        ("Entity", "where_rules") if body_len(root, &owner.ptr, "where_rules") == 0 => "attributes",
+        ("Type", "where_rules") if body_len(root, &owner.ptr, "where_rules") == 0 => {
+            "underlying_type"
+        }
         _ => region,
     };
     (Some(owner.ptr.clone()), Some("trailing"), Some(region))
@@ -2796,6 +2824,13 @@ fn body_len(root: &Value, ptr: &str, attr: &str) -> usize {
         .and_then(Value::as_array)
         .map(Vec::len)
         .unwrap_or(0)
+}
+
+/// `own_line_remark?`: nothing but blanks precedes the remark on its
+/// line.
+fn own_line_remark(lines: &[&str], line: usize) -> bool {
+    let content = lines.get(line - 1).copied().unwrap_or("").trim_start();
+    content.starts_with("--") || content.starts_with("(*")
 }
 
 /// `inline_remark?`: code precedes the remark on its own line.
@@ -3121,7 +3156,7 @@ fn find_body_comment_target(
             return lvt;
         }
     }
-    let closing = closing_region_target(root, index, lines, line);
+    let closing = closing_region_target(root, index, lines, line, own_line_remark(lines, line));
     if closing.0.is_some() {
         return closing;
     }
