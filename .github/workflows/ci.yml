@@ -100,6 +100,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: lutaml/expressir
+          # PR TEMPORARY: the inline remarks of WHERE rules and enumeration
+          # items land in the ruby lane and in this repo together
+          # (lutaml/expressir#724); revert to main once the expressir
+          # branch of the same name merges.
+          ref: fix/enumeration-item-and-where-rule-remarks
           path: expressir
       - name: Sync the split grammar (expressir#588)
         run: |
