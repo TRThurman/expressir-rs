@@ -63,8 +63,12 @@ fn the_stripped_form_writes_none_of_them() {
 
 #[test]
 fn the_plain_form_writes_both_before_end_schema() {
+    // The plain form ends at `END_SCHEMA;`: D3 stands after the schema.
     let out = expressir::formatter::format_with_keep(&attached(PROBE), true, true);
-    assert_eq!(out, PROBE_OUT);
+    assert_eq!(
+        out,
+        PROBE_OUT.replace(" -- D3 after the end of the schema on its line", "")
+    );
 }
 
 #[test]
@@ -84,7 +88,7 @@ fn the_schema_holds_d1_and_d2_as_trailing_remarks_of_its_declarations() {
 }
 
 #[test]
-fn a_comment_after_end_schema_on_its_line_stays_where_it_was() {
+fn a_comment_after_end_schema_on_its_line_stays_in_the_ordinary_form() {
     let s = "SCHEMA s;\nENTITY a;\nEND_ENTITY;\nEND_SCHEMA; -- D3 inline\n";
     assert_eq!(
         text(s),
@@ -97,7 +101,7 @@ fn a_comment_after_end_schema_on_its_line_stays_where_it_was() {
     let plain = expressir::formatter::format_with_keep(&attached(s), true, true);
     assert_eq!(
         plain,
-        "SCHEMA s;\n\nENTITY a;\nEND_ENTITY;\n\nEND_SCHEMA; -- D3 inline\n"
+        "SCHEMA s;\n\nENTITY a;\nEND_ENTITY;\n\nEND_SCHEMA;\n"
     );
 }
 

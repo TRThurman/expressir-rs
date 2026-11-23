@@ -592,7 +592,10 @@ impl<'a> Formatter<'a> {
             out.push(String::new());
         }
         out.extend(closing);
-        out.push(format!("END_SCHEMA;{}", self.format_end_scope_remark(node)));
+        out.push(format!(
+            "END_SCHEMA;{}",
+            self.format_schema_end_remark(node)
+        ));
         out.join("\n")
     }
 
@@ -2069,6 +2072,16 @@ impl<'a> Formatter<'a> {
         }
     }
 
+    /// The remark that follows `END_SCHEMA;`. It stands after the schema:
+    /// the plain form (`no_remarks` with `keep_untagged_remarks`) is the
+    /// schema with its untagged remarks and ends at `END_SCHEMA;`.
+    fn format_schema_end_remark(&self, node: &Value) -> String {
+        if self.no_remarks {
+            return String::new();
+        }
+        self.format_end_scope_remark(node)
+    }
+
     fn format_end_scope_remark(&self, node: &Value) -> String {
         if self.no_remarks && !self.keep_untagged_remarks {
             return String::new();
@@ -2764,7 +2777,7 @@ impl PrettyFormatter {
             out.push(String::new());
         }
         out.extend(closing);
-        out.push(format!("END_SCHEMA;{}", f.format_end_scope_remark(node)));
+        out.push(format!("END_SCHEMA;{}", f.format_schema_end_remark(node)));
         out.join("\n")
     }
 
