@@ -985,7 +985,16 @@ impl<'a> Formatter<'a> {
                 .map(|i| self.child(ptr, &format!("items/{i}")))
                 .collect::<Vec<_>>()
                 .join(&format!(",\n{item_indent}"));
-            out.push_str(&format!("\n{};", self.indent(&format!("({items})"))));
+            // A remark that followed the opening parenthesis keeps it on
+            // the clause's first line: `USE FROM x ( -- why`.
+            let after_parenthesis =
+                self.formatted_inline_remarks(node, &|r: &Remark| r.inline_region("items"));
+            if after_parenthesis.is_empty() {
+                out.push_str(&format!("\n{};", self.indent(&format!("({items})"))));
+            } else {
+                let list = self.indent(&format!("{item_indent}{items})"));
+                out.push_str(&format!(" ({after_parenthesis}\n{list};"));
+            }
         } else {
             out.push(';');
         }
