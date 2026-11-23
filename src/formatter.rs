@@ -25,6 +25,13 @@ fn is(node: &Value, suffix: &str) -> bool {
     cls(node).ends_with(&format!("::{suffix}"))
 }
 
+/// An item of an ENUMERATION, or a reference: the items of a SELECT are
+/// references, and the attacher places an inline remark on a reference
+/// only there.
+fn is_list_item(node: &Value) -> bool {
+    is(node, "DataTypes::EnumerationItem") || is(node, "References::SimpleReference")
+}
+
 fn id_of(node: &Value) -> Option<&str> {
     node.get("id").and_then(Value::as_str)
 }
@@ -776,9 +783,10 @@ impl<'a> Formatter<'a> {
     }
 
     fn format_type(&mut self, ptr: &str, node: &Value) -> String {
+        // The remark of the last item of an ENUMERATION or of a SELECT.
         let last_item = arr(node.get("underlying_type").unwrap_or(&Value::Null), "items")
             .last()
-            .filter(|item| is(item, "DataTypes::EnumerationItem"))
+            .filter(|item| is_list_item(item))
             .map(|item| self.formatted_inline_remarks(item, &|r: &Remark| r.region.is_none()))
             .unwrap_or_default();
         let mut out = vec![format!(
@@ -1396,18 +1404,31 @@ impl<'a> Formatter<'a> {
         let item_indent = " ".repeat("(".len());
         let count = arr(self.node(ptr), field).len();
         // A remark that follows an item on its line is written after the
-        // comma. The remark of the last item of an ENUMERATION is written
-        // after the `;` of its TYPE (`format_type`): before it, a tail
-        // remark would take the `)` and the `;` with it.
+        // comma. The remark of the last item is written after the `;` of
+        // the TYPE (`format_type`): before it, a tail remark would take
+        // the `)` and the `;` with it. The remarks that stand on lines of
+        // their own above an item come back from `child` above the item:
+        // each remark and the item start at the depth of the items, and
+        // the lines inside a remark of several lines are left as they are.
         let items = (0..count)
             .map(|i| {
                 let item_ptr = format!("{field}/{i}");
-                let text = self.child(ptr, &item_ptr);
+                let item = self.node(&format!("{ptr}/{item_ptr}")).clone();
+                let mut text = self.child(ptr, &item_ptr);
+                let leading = self.format_leading_statement_remarks(&item);
+                let above = format!("{}\n", leading.join("\n"));
+                if let Some(own) = text.strip_prefix(&above).filter(|_| !leading.is_empty()) {
+                    text = leading
+                        .iter()
+                        .map(String::as_str)
+                        .chain([own])
+                        .collect::<Vec<_>>()
+                        .join(&format!("\n{item_indent}"));
+                }
                 if i + 1 == count {
                     return text;
                 }
-                let item = self.node(&format!("{ptr}/{item_ptr}")).clone();
-                let remark = if is(&item, "DataTypes::EnumerationItem") {
+                let remark = if is_list_item(&item) {
                     self.formatted_inline_remarks(&item, &|r: &Remark| r.region.is_none())
                 } else {
                     String::new()
@@ -2305,10 +2326,10 @@ impl<'a> Formatter<'a> {
     // ---- placement glue (Formatter#format's place_remarks) ----
 
     fn place_remarks(&mut self, mut formatted: String, ptr: &str, node: &Value) -> String {
-        // An enumeration item is followed by a comma or by the `)` and
-        // `;` of its TYPE: its list and its TYPE write the remark after
-        // those (`indent_items`, `format_type`).
-        let inline = if is(node, "DataTypes::EnumerationItem") {
+        // An item of an ENUMERATION or of a SELECT is followed by a
+        // comma or by the `)` and `;` of its TYPE: its list and its TYPE
+        // write the remark after those (`indent_items`, `format_type`).
+        let inline = if is_list_item(node) {
             String::new()
         } else {
             self.formatted_inline_remarks(node, &|r: &Remark| r.region.is_none())
