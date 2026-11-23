@@ -1823,6 +1823,16 @@ fn is_remark_scope(class: &str) -> bool {
     is_semantic(class) && class != "Interface"
 }
 
+/// The collection name the items of a SELECT list are indexed under.
+pub const SELECT_ITEMS: &str = "select_items";
+
+/// Whether an indexed node can own a remark sitting on a line of its
+/// own. An item of a SELECT list cannot: it is written inside the list,
+/// and only a remark placed on it (inline or leading) is written there.
+fn owns_own_line_remark(entry: &IndexEntry) -> bool {
+    is_remark_scope(&entry.class) && entry.collection != Some(SELECT_ITEMS)
+}
+
 /// Ruby position_valid?'s offset-0 keyword set (node_position_index.rb).
 const DECLARATION_KEYWORDS: &[&str] = &[
     "SCHEMA",
@@ -1961,7 +1971,7 @@ impl WireIndex {
         let same_start: Vec<&IndexEntry> = self
             .starting_at(remark_line)
             .into_iter()
-            .filter(|e| is_remark_scope(&e.class))
+            .filter(|e| owns_own_line_remark(e))
             .collect();
         if let Some(last) = same_start.last() {
             return Some(last);
@@ -1969,7 +1979,7 @@ impl WireIndex {
         let same_end: Vec<&IndexEntry> = self
             .ending_at(remark_line)
             .into_iter()
-            .filter(|e| is_remark_scope(&e.class))
+            .filter(|e| owns_own_line_remark(e))
             .collect();
         if let Some(last) = same_end.last() {
             return Some(last);
@@ -1977,7 +1987,7 @@ impl WireIndex {
         let mut containing: Vec<&IndexEntry> = self
             .spanning(remark_line)
             .into_iter()
-            .filter(|e| is_remark_scope(&e.class))
+            .filter(|e| owns_own_line_remark(e))
             .collect();
         if !containing.is_empty() {
             // A remark BEFORE the first schema belongs to the file
@@ -2145,6 +2155,29 @@ fn collect(
                             &format!("{ptr}/{key}/{i}"),
                             Some(ptr.to_string()),
                             Some(key),
+                            starts,
+                            out,
+                        );
+                    }
+                }
+            }
+            // The items of a SELECT list are references, which no
+            // collection carries. They are indexed under their TYPE so
+            // that a remark inside the list finds the item it follows or
+            // precedes (`inline_target`, `declaration_level_target`).
+            if class == "Declarations::Type" {
+                let select_items = map
+                    .get("underlying_type")
+                    .filter(|ut| class_suffix(ut).is_some_and(|c| c == "Select"))
+                    .and_then(|ut| ut.get("items"))
+                    .and_then(Value::as_array);
+                if let Some(items) = select_items {
+                    for (j, item) in items.iter().enumerate() {
+                        collect(
+                            item,
+                            &format!("{ptr}/underlying_type/items/{j}"),
+                            Some(ptr.to_string()),
+                            Some(SELECT_ITEMS),
                             starts,
                             out,
                         );
@@ -2402,6 +2435,54 @@ fn takes_inline_remark(class: &str) -> bool {
         || is_enumeration_item
         || is_constant
         || is_unique
+}
+
+/// Whether an indexed node takes a remark written after it on its line:
+/// the classes of `takes_inline_remark`, and an item of a SELECT list. The
+/// item is a reference, and a reference takes such a remark nowhere else
+/// (the `FOR` items of a RULE are indexed too), so the index entry is
+/// asked, not the class.
+fn takes_inline(entry: &IndexEntry) -> bool {
+    takes_inline_remark(&entry.full_class) || entry.collection == Some(SELECT_ITEMS)
+}
+
+/// Whether the remark on `line` stands where it can lead an item of a
+/// SELECT list: the code before it, on its line or on the lines above,
+/// ends with the parenthesis that opens the list or with the comma of the
+/// item before, and no code follows it on its line.
+fn leads_select_item(lines: &[&str], line: usize) -> bool {
+    let content = lines.get(line - 1).copied().unwrap_or("");
+    let code = keyword_scannable(content);
+    let (before, block) = code.split_once("(*").unwrap_or((code.as_str(), ""));
+    let after = block.split_once("*)").map_or("", |(_, rest)| rest);
+    if !after.trim().is_empty() {
+        return false;
+    }
+    let before = if before.trim().is_empty() {
+        last_code_before(lines, line)
+    } else {
+        before.trim_end().to_string()
+    };
+    before.ends_with('(') || before.ends_with(',')
+}
+
+/// The code of the nearest line above `line` that holds code.
+fn last_code_before(lines: &[&str], line: usize) -> String {
+    for number in (1..line).rev() {
+        let mut code = keyword_scannable(lines.get(number - 1).copied().unwrap_or(""));
+        // Block comments that open and close on the line are no code.
+        while let Some(open) = code.find("(*") {
+            let Some(close) = code[open..].find("*)") else {
+                break;
+            };
+            code.replace_range(open..open + close + 2, "");
+        }
+        let code = code.trim();
+        if !code.is_empty() && !code.starts_with("(*") {
+            return code.to_string();
+        }
+    }
+    String::new()
 }
 
 /// Executable-statement owners for region lookup (`Model::Statement`
@@ -2881,7 +2962,7 @@ fn inline_target(
     let started_here: Vec<&IndexEntry> = pool
         .iter()
         .filter(|e| {
-            takes_inline_remark(&e.full_class)
+            takes_inline(e)
                 && e.line == remark_line
                 && e.offset.is_some_and(|o| o < remark_position as u64)
         })
@@ -2914,7 +2995,7 @@ fn inline_target(
         None => pool
             .iter()
             .filter(|e| {
-                takes_inline_remark(&e.full_class)
+                takes_inline(e)
                     && e.end_line == Some(remark_line)
                     && e.line < remark_line
                     && e.offset.is_some_and(|o| o < remark_position as u64)
@@ -3191,12 +3272,12 @@ fn find_body_comment_target(
     }
     let Some((enclosing, region_entries, _region_attr)) = statement_region_for(index, lines, line)
     else {
-        return declaration_level_target(index, line);
+        return declaration_level_target(index, lines, line);
     };
     // Ruby treats missing region entries as "not in a statement region"
     // and hands the remark to the declaration-level lookup instead.
     let Some(region_entries) = region_entries else {
-        return declaration_level_target(index, line);
+        return declaration_level_target(index, lines, line);
     };
     let following = region_entries
         .iter()
@@ -3215,13 +3296,15 @@ fn find_body_comment_target(
 /// nothing here and keeps the legacy attachment.
 fn declaration_level_target(
     index: &WireIndex,
+    lines: &[&str],
     line: usize,
 ) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
     let miss = (None, None, None);
     let scope = index
         .spanning(line)
         .into_iter()
-        .filter(|e| e.class != "ExpFile")
+        // An item of a SELECT list encloses nothing.
+        .filter(|e| e.class != "ExpFile" && e.collection != Some(SELECT_ITEMS))
         .min_by_key(|e| (e.end_line.unwrap_or(0) - e.line, e.line));
     let Some(scope) = scope else {
         return miss;
@@ -3232,6 +3315,9 @@ fn declaration_level_target(
         .filter(|e| e.line > line && e.line <= end)
         .min_by_key(|e| e.line);
     match following {
+        // A remark between `SELECT` and the parenthesis, or after the
+        // code of another line, does not lead an item of the list.
+        Some(f) if f.collection == Some(SELECT_ITEMS) && !leads_select_item(lines, line) => miss,
         Some(f) => (Some(f.ptr.clone()), Some("leading"), None),
         None => miss,
     }
