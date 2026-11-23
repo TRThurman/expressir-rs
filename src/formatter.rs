@@ -1802,7 +1802,11 @@ impl<'a> Formatter<'a> {
             }
             "CaseAction" => {
                 let label_remark = self.case_label_remark(ptr);
-                format!(
+                // The remarks written before the label (own-line comments
+                // between two actions) stand above it.
+                let above =
+                    self.format_before_label_remarks(self.node(&format!("{ptr}/statement")));
+                let head = format!(
                     "{} :{}\n{}",
                     self.list_join(ptr, "labels", ", "),
                     label_remark,
@@ -1810,7 +1814,12 @@ impl<'a> Formatter<'a> {
                         let rendered = self.child(ptr, "statement");
                         self.indent(&rendered)
                     }
-                )
+                );
+                above
+                    .into_iter()
+                    .chain([head])
+                    .collect::<Vec<_>>()
+                    .join("\n")
             }
             "Compound" => {
                 let mut out = vec!["BEGIN".to_string()];
@@ -2266,7 +2275,22 @@ impl<'a> Formatter<'a> {
         arr(node, "untagged_remarks")
             .iter()
             .map(Remark::from)
-            .filter(|r| r.leading())
+            .filter(|r| r.leading() && r.region != Some("before_label"))
+            .map(|r| self.format_untagged_remark(&r))
+            .filter(|t| !t.is_empty())
+            .collect()
+    }
+
+    /// The leading remarks of a CASE action's statement written before the
+    /// label of the action; the CASE action writes them above the label.
+    fn format_before_label_remarks(&self, node: &Value) -> Vec<String> {
+        if self.no_remarks && !self.keep_untagged_remarks {
+            return Vec::new();
+        }
+        arr(node, "untagged_remarks")
+            .iter()
+            .map(Remark::from)
+            .filter(|r| r.leading() && r.region == Some("before_label"))
             .map(|r| self.format_untagged_remark(&r))
             .filter(|t| !t.is_empty())
             .collect()

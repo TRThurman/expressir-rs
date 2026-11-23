@@ -2408,6 +2408,7 @@ pub const REGION_ITEMS: &str = "items";
 pub const REGION_ELSE: &str = "else";
 pub const REGION_OTHERWISE: &str = "otherwise";
 pub const REGION_LABEL: &str = "label";
+pub const REGION_BEFORE_LABEL: &str = "before_label";
 
 /// Wire classes that can take a remark written after them on the same
 /// line (`Model::TakesInlineRemark` = Statement + Interface + Function +
@@ -3519,7 +3520,7 @@ pub fn attach_untagged_remarks(root: &mut Value, source: &str, annotations: bool
 
         // Body comments: inline, closing, or leading/trailing.
         let (target, placement, region) =
-            find_body_comment_target(root, &index, &lines, remark.line, remark.position);
+            find_body_comment_target(root, source, &index, &lines, remark.line, remark.position);
         if let Some(ptr) = target {
             if let Some(node) = root.pointer_mut(&ptr) {
                 add_remark_with_placement(node, &remark.text, remark.format, placement, region);
@@ -3543,6 +3544,7 @@ pub fn attach_untagged_remarks(root: &mut Value, source: &str, annotations: bool
 #[allow(clippy::type_complexity)]
 fn find_body_comment_target(
     root: &Value,
+    source: &str,
     index: &WireIndex,
     lines: &[&str],
     line: usize,
@@ -3593,9 +3595,63 @@ fn find_body_comment_target(
         .filter(|e| e.line > line)
         .min_by_key(|e| e.order);
     if let Some(following) = following {
-        return (Some(following.ptr.clone()), Some("leading"), None);
+        let region = before_case_label_region(root, source, following, position);
+        return (Some(following.ptr.clone()), Some("leading"), region);
     }
     (Some(enclosing.ptr.clone()), None, None)
+}
+
+/// A leading remark of the statement of a CASE action that was written
+/// before the label of that action (between two actions, or before the
+/// first) has the region `before_label`: the formatter writes it above the
+/// label. One written after the label has no region. The text between the
+/// remark and the statement tells them apart: only remarks and white space
+/// means the label is already behind the remark. (A label that is a
+/// reference carries no source offset to compare.)
+fn before_case_label_region(
+    root: &Value,
+    source: &str,
+    following: &IndexEntry,
+    position: usize,
+) -> Option<&'static str> {
+    let action = following.ptr.strip_suffix("/statement")?;
+    root.pointer(&format!("{action}/labels"))?;
+    let gap = source
+        .as_bytes()
+        .get(position..following.offset? as usize)?;
+    (!only_remarks_and_space(gap)).then_some(REGION_BEFORE_LABEL)
+}
+
+fn only_remarks_and_space(gap: &[u8]) -> bool {
+    let mut i = 0;
+    while i < gap.len() {
+        if gap[i].is_ascii_whitespace() {
+            i += 1;
+        } else if gap[i..].starts_with(b"--") {
+            while i < gap.len() && gap[i] != b'\n' {
+                i += 1;
+            }
+        } else if gap[i..].starts_with(b"(*") {
+            // A block remark ends at its matching `*)`; an unterminated
+            // one leaves nothing but remarks.
+            let mut depth = 1;
+            i += 2;
+            while i < gap.len() && depth > 0 {
+                if gap[i..].starts_with(b"(*") {
+                    depth += 1;
+                    i += 2;
+                } else if gap[i..].starts_with(b"*)") {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+            }
+        } else {
+            return false;
+        }
+    }
+    true
 }
 
 /// A whole-line comment between declarations leads the next declaration:
