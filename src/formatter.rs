@@ -691,7 +691,15 @@ impl<'a> Formatter<'a> {
             let body = self.join_grouped(&explicit, "\n", true);
             out.push(self.indent(&body));
         }
-        for (label, group) in [("DERIVE", derived), ("INVERSE", inverse)] {
+        // A comment after the last member of a section closes it, before
+        // the keyword of the next section or END_ENTITY.
+        for remark in self.format_trailing_region_remarks(node, "attributes") {
+            out.push(self.indent(&remark));
+        }
+        for (label, group, region) in [
+            ("DERIVE", derived, "derived_attributes"),
+            ("INVERSE", inverse, "inverse_attributes"),
+        ] {
             if !group.is_empty() {
                 let body = group
                     .iter()
@@ -700,16 +708,16 @@ impl<'a> Formatter<'a> {
                     .join("\n");
                 out.push(format!("{label}\n{}", self.indent(&body)));
             }
+            for remark in self.format_trailing_region_remarks(node, region) {
+                out.push(self.indent(&remark));
+            }
         }
         for (label, field) in [("UNIQUE", "unique_rules"), ("WHERE", "where_rules")] {
             if !arr(node, field).is_empty() {
                 let body = self.list_join(ptr, field, "\n");
                 out.push(format!("{label}\n{}", self.indent(&body)));
             }
-        }
-        // A comment after the last attribute or rule closes the entity.
-        for region in ["attributes", "where_rules"] {
-            for remark in self.format_trailing_region_remarks(node, region) {
+            for remark in self.format_trailing_region_remarks(node, field) {
                 out.push(self.indent(&remark));
             }
         }
@@ -802,15 +810,17 @@ impl<'a> Formatter<'a> {
             id_of(node).unwrap_or_default(),
             self.child(ptr, "underlying_type")
         )];
+        // A comment after the definition closes it, before WHERE or END_TYPE;
+        // one after the last rule closes the type.
+        for remark in self.format_trailing_region_remarks(node, "underlying_type") {
+            out.push(self.indent(&remark));
+        }
         if !arr(node, "where_rules").is_empty() {
             let body = self.list_join(ptr, "where_rules", "\n");
             out.push(format!("WHERE\n{}", self.indent(&body)));
         }
-        // A comment after the definition or the last rule closes the type.
-        for region in ["underlying_type", "where_rules"] {
-            for remark in self.format_trailing_region_remarks(node, region) {
-                out.push(self.indent(&remark));
-            }
+        for remark in self.format_trailing_region_remarks(node, "where_rules") {
+            out.push(self.indent(&remark));
         }
         for remark in self.format_remark_items_children(ptr) {
             out.push(self.indent(&remark));
@@ -2808,13 +2818,20 @@ impl PrettyFormatter {
             out.push(preamble.trim_end().to_string());
         }
         out.extend(explicit);
-        if !derived.is_empty() {
-            out.push("DERIVE".to_string());
-            out.push(self.indent(&derived.join("\n")));
+        for remark in f.format_trailing_region_remarks(node, "attributes") {
+            out.push(self.indent(&remark));
         }
-        if !inverse.is_empty() {
-            out.push("INVERSE".to_string());
-            out.push(self.indent(&inverse.join("\n")));
+        for (keyword, rendered, region) in [
+            ("DERIVE", &derived, "derived_attributes"),
+            ("INVERSE", &inverse, "inverse_attributes"),
+        ] {
+            if !rendered.is_empty() {
+                out.push(keyword.to_string());
+                out.push(self.indent(&rendered.join("\n")));
+            }
+            for remark in f.format_trailing_region_remarks(node, region) {
+                out.push(self.indent(&remark));
+            }
         }
         for (field, keyword) in [("unique_rules", "UNIQUE"), ("where_rules", "WHERE")] {
             let items = arr(node, field);
@@ -2825,9 +2842,7 @@ impl PrettyFormatter {
                 out.push(keyword.to_string());
                 out.push(self.indent(&rendered.join("\n")));
             }
-        }
-        for region in ["attributes", "where_rules"] {
-            for remark in f.format_trailing_region_remarks(node, region) {
+            for remark in f.format_trailing_region_remarks(node, field) {
                 out.push(self.indent(&remark));
             }
         }
