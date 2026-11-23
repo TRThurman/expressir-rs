@@ -2570,6 +2570,24 @@ static CLOSING_KEYWORDS: LazyLock<Vec<(Regex, &'static str, &'static str)>> = La
             "Type",
             "where_rules",
         ),
+        // DERIVE, INVERSE and UNIQUE close the section before them; the
+        // WHERE of an ENTITY or a TYPE is resolved in closing_region_target
+        // from the construct open at that line.
+        (
+            Regex::new(r"(?i)\ADERIVE\b").unwrap(),
+            "Entity",
+            "attributes",
+        ),
+        (
+            Regex::new(r"(?i)\AINVERSE\b").unwrap(),
+            "Entity",
+            "derived_attributes",
+        ),
+        (
+            Regex::new(r"(?i)\AUNIQUE\b").unwrap(),
+            "Entity",
+            "inverse_attributes",
+        ),
     ]
 });
 
@@ -2897,24 +2915,41 @@ fn closing_region_target(
     let Some((owner_class, region, keyword_line)) = closing_keyword_after(lines, line) else {
         return (None, None, None);
     };
+    let map = active_scope_map(lines);
+    // The map is 0-indexed by line: entry k holds line k+1.
+    let Some(active) = map.get(keyword_line - 1).copied().flatten() else {
+        return (None, None, None);
+    };
+    let opener_line = active.1;
+    // The WHERE keyword of a RULE closes its statements; where an ENTITY or
+    // a TYPE is open it closes the unique rules (or the section before
+    // them) or the definition.
+    let (owner_class, region) = match (owner_class, region, active.0.is_empty()) {
+        ("Rule", "statements", true) => {
+            match index.starting_at(opener_line).into_iter().find_map(|e| {
+                ["Entity", "Type"]
+                    .into_iter()
+                    .find(|class| e.class == *class)
+            }) {
+                Some("Entity") => ("Entity", "unique_rules"),
+                Some(_) => ("Type", "underlying_type"),
+                None => (owner_class, region),
+            }
+        }
+        _ => (owner_class, region),
+    };
     // Only a comment on a line of its own closes an ENTITY or a TYPE: one
     // at the end of a code line belongs to the attribute, rule or item
     // written on that line.
     if !own_line && matches!(owner_class, "Entity" | "Type") {
         return (None, None, None);
     }
-    let map = active_scope_map(lines);
-    // The map is 0-indexed by line: entry k holds line k+1.
-    let Some(active) = map.get(keyword_line - 1).copied().flatten() else {
-        return (None, None, None);
-    };
     // ENTITY / TYPE openers are tracked with the empty class; the class
     // check on the node found at the opener line tells the two apart.
     let untracked = active.0.is_empty() && matches!(owner_class, "Entity" | "Type");
     if active.0 != owner_class && !untracked {
         return (None, None, None);
     }
-    let opener_line = active.1;
     let owner = index
         .starting_at(opener_line)
         .into_iter()
@@ -2960,15 +2995,52 @@ fn closing_region_target(
                 region
             }
         }
-        // END_ENTITY closes the attributes, END_TYPE the definition, when
-        // the declaration has no WHERE section.
-        ("Entity", "where_rules") if body_len(root, &owner.ptr, "where_rules") == 0 => "attributes",
+        // END_ENTITY and the section keywords close the last section the
+        // entity has before them, END_TYPE the definition when the type
+        // has no WHERE section.
+        ("Entity", _) => {
+            let upto = ENTITY_SECTIONS
+                .iter()
+                .position(|s| *s == region)
+                .unwrap_or(0);
+            ENTITY_SECTIONS[..=upto]
+                .iter()
+                .rev()
+                .copied()
+                .find(|s| *s == "attributes" || entity_section_len(root, &owner.ptr, s) > 0)
+                .unwrap_or("attributes")
+        }
         ("Type", "where_rules") if body_len(root, &owner.ptr, "where_rules") == 0 => {
             "underlying_type"
         }
         _ => region,
     };
     (Some(owner.ptr.clone()), Some("trailing"), Some(region))
+}
+
+/// The sections of an entity, in source order.
+const ENTITY_SECTIONS: [&str; 5] = [
+    "attributes",
+    "derived_attributes",
+    "inverse_attributes",
+    "unique_rules",
+    "where_rules",
+];
+
+/// The members of an entity section. Derived and inverse attributes are
+/// told by their `kind`, wherever the wire keeps them.
+fn entity_section_len(root: &Value, ptr: &str, section: &str) -> usize {
+    let kind = match section {
+        "derived_attributes" => "DERIVED",
+        "inverse_attributes" => "INVERSE",
+        _ => return body_len(root, ptr, section),
+    };
+    ["attributes", "derived_attributes", "inverse_attributes"]
+        .iter()
+        .filter_map(|field| root.pointer(ptr)?.get(field)?.as_array())
+        .flatten()
+        .filter(|a| a.get("kind").and_then(Value::as_str) == Some(kind))
+        .count()
 }
 
 fn body_len(root: &Value, ptr: &str, attr: &str) -> usize {
