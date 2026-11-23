@@ -2369,6 +2369,9 @@ pub const PLACEMENT_LEADING: &str = "leading";
 pub const PLACEMENT_TRAILING: &str = "trailing";
 pub const PLACEMENT_INLINE: &str = "inline";
 pub const REGION_OPENER: &str = "opener";
+/// Region of an INLINE remark that trailed the opening parenthesis of an
+/// interface clause's item list (`USE FROM x ( -- why`).
+pub const REGION_ITEMS: &str = "items";
 pub const REGION_ELSE: &str = "else";
 pub const REGION_OTHERWISE: &str = "otherwise";
 pub const REGION_LABEL: &str = "label";
@@ -2807,11 +2810,21 @@ fn inline_remark(lines: &[&str], line: usize) -> bool {
     }
 }
 
+/// Whether the line, up to its `--` remark, ends with an opening
+/// parenthesis. A line that holds a `(* *)` remark as well is left out:
+/// the region is one per line, and that remark may stand on the other
+/// side of the parenthesis.
+fn opens_item_list(lines: &[&str], line: usize) -> bool {
+    let content = lines.get(line - 1).copied().unwrap_or("");
+    let code = keyword_scannable(content);
+    code.trim_end().ends_with('(') && !code.contains("(*")
+}
+
 /// `inline_target` + `single_line_owner`/`opener_owner`/`closing_owner`.
 #[allow(clippy::type_complexity)]
 fn inline_target(
     index: &WireIndex,
-    _lines: &[&str],
+    lines: &[&str],
     remark_line: usize,
     remark_position: usize,
 ) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
@@ -2868,7 +2881,13 @@ fn inline_target(
         return (None, None, None);
     };
     let region = if owner.end_line.is_some_and(|end| end > remark_line) {
-        Some(REGION_OPENER)
+        // `USE FROM x ( -- why`: the remark follows the parenthesis that
+        // opens the item list, and belongs back after it.
+        if owner.class == "Interface" && opens_item_list(lines, remark_line) {
+            Some(REGION_ITEMS)
+        } else {
+            Some(REGION_OPENER)
+        }
     } else {
         None
     };
