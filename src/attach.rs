@@ -2578,7 +2578,7 @@ static CLOSING_KEYWORDS: LazyLock<Vec<(Regex, &'static str, &'static str)>> = La
 #[allow(dead_code)] // staged: consumed by the untagged orchestrator
 static OPENERS: LazyLock<Vec<(Regex, &'static str)>> = LazyLock::new(|| {
     vec![
-        (Regex::new(r"(?i)\bIF\b.*?\bTHEN\b").unwrap(), "If"),
+        (Regex::new(r"(?i)\bIF\b").unwrap(), "If"),
         (Regex::new(r"(?i)\bCASE\b.*?\bOF\b").unwrap(), "Case"),
         (Regex::new(r"(?i)\bREPEAT\b").unwrap(), "Repeat"),
         (Regex::new(r"(?i)\bALIAS\b").unwrap(), "Alias"),
@@ -2645,6 +2645,56 @@ static REGION_OPENER_ELSE: LazyLock<Regex> =
 static REGION_OPENER_OTHERWISE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"(?i)\A\s*OTHERWISE\b").unwrap());
 
+/// `code_lines`: the code of each source line, for the scope map only:
+/// strings blanked, a `--` tail cut and every part inside a `(* ... *)`
+/// comment removed. The comment state runs from line to line, so a remark
+/// of several lines, or one that nests, hides the keywords written in its
+/// prose; a `--` inside a block remark ends nothing, and a `(*` inside a
+/// string or after `--` opens nothing.
+fn code_lines(lines: &[&str]) -> Vec<String> {
+    let mut depth = 0usize;
+    lines
+        .iter()
+        .map(|raw| {
+            let chars: Vec<char> = raw.chars().collect();
+            let mut code = String::new();
+            let mut i = 0;
+            while i < chars.len() {
+                let pair = (chars[i], chars.get(i + 1).copied());
+                if depth > 0 {
+                    if pair == ('(', Some('*')) {
+                        depth += 1;
+                        i += 2;
+                    } else if pair == ('*', Some(')')) {
+                        depth -= 1;
+                        if depth == 0 {
+                            code.push(' ');
+                        }
+                        i += 2;
+                    } else {
+                        i += 1;
+                    }
+                } else if chars[i] == '\'' {
+                    code.push_str("''");
+                    i = match chars[i + 1..].iter().position(|c| *c == '\'') {
+                        Some(close) => i + 1 + close + 1,
+                        None => chars.len(),
+                    };
+                } else if pair == ('-', Some('-')) {
+                    break;
+                } else if pair == ('(', Some('*')) {
+                    depth = 1;
+                    i += 2;
+                } else {
+                    code.push(chars[i]);
+                    i += 1;
+                }
+            }
+            code
+        })
+        .collect()
+}
+
 /// `active_scope_map`: line => the construct open at the START of the
 /// line, as (class, opening_line). Stack events come from
 /// `line_events` over `keyword_scannable` content; blank and comment
@@ -2652,13 +2702,14 @@ static REGION_OPENER_OTHERWISE: LazyLock<Regex> =
 fn active_scope_map(lines: &[&str]) -> Vec<Option<(&'static str, usize)>> {
     let mut map = Vec::with_capacity(lines.len() + 1);
     let mut stack: Vec<(&'static str, usize)> = Vec::new();
-    for (idx, raw) in lines.iter().enumerate() {
+    let code = code_lines(lines);
+    for (idx, raw) in code.iter().enumerate() {
         map.push(stack.last().copied());
-        let content = keyword_scannable(raw.trim());
-        if content.trim().is_empty() || content.trim_start().starts_with("--") {
+        let content = raw.trim();
+        if content.is_empty() {
             continue;
         }
-        for (_, kind, class) in line_events(&content) {
+        for (_, kind, class) in line_events(content) {
             if kind {
                 stack.push((class, idx + 1));
             } else {
@@ -2870,6 +2921,13 @@ fn closing_region_target(
     let Some(owner) = owner else {
         return (None, None, None);
     };
+    // Several constructs of the class may start on that line: the one
+    // still open reaches the keyword line.
+    let owner = index
+        .starting_at(opener_line)
+        .into_iter()
+        .rfind(|e| e.class == owner_class && e.end_line.is_some_and(|end| end >= keyword_line))
+        .unwrap_or(owner);
     // END_IF closes the THEN body when there is no ELSE; END_CASE closes
     // the last action when there is no OTHERWISE; END_RULE closes the
     // statements when the rule has no WHERE section.
