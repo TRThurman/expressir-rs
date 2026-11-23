@@ -3079,6 +3079,87 @@ fn inline_target(
     (Some(owner.ptr.clone()), Some("inline"), region)
 }
 
+/// The columns of the `(* ... *)` comments that follow the label of a
+/// WHERE rule on this line: `wr1 : (* a *) (* b *) size > 0;`. The line
+/// starts with the label, so no string comes before it; white space may
+/// separate the label's colon and the comments; a comment nests and ends
+/// at its own `*)`. A comment that does not end on the line is the last.
+fn label_block_columns(content: &str) -> Vec<usize> {
+    let b = content.as_bytes();
+    let mut i = 0;
+    let mut columns = Vec::new();
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    if i >= b.len() || !(b[i].is_ascii_alphabetic() || b[i] == b'_') {
+        return columns;
+    }
+    while i < b.len() && (b[i].is_ascii_alphanumeric() || b[i] == b'_') {
+        i += 1;
+    }
+    while i < b.len() && b[i].is_ascii_whitespace() {
+        i += 1;
+    }
+    // `:=` is an assignment, not a label.
+    if i >= b.len() || b[i] != b':' || b.get(i + 1) == Some(&b'=') {
+        return columns;
+    }
+    i += 1;
+    loop {
+        while i < b.len() && b[i].is_ascii_whitespace() {
+            i += 1;
+        }
+        if !b[i..].starts_with(b"(*") {
+            return columns;
+        }
+        columns.push(i);
+        let mut depth = 0;
+        while i < b.len() {
+            if b[i..].starts_with(b"(*") {
+                depth += 1;
+                i += 2;
+            } else if b[i..].starts_with(b"*)") {
+                depth -= 1;
+                i += 2;
+                if depth == 0 {
+                    break;
+                }
+            } else {
+                i += 1;
+            }
+        }
+        if depth != 0 {
+            return columns;
+        }
+    }
+}
+
+/// A `(* block *)` comment right after the label of a WHERE rule belongs
+/// to that rule, written after the label like a `--` comment there. Asked
+/// only on the first line of a WHERE rule.
+#[allow(clippy::type_complexity)]
+fn where_label_block_target(
+    index: &WireIndex,
+    lines: &[&str],
+    line: usize,
+    position: usize,
+) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
+    let content = lines.get(line - 1).copied().unwrap_or("");
+    let line_start = index.starts.get(line - 1).copied().unwrap_or(0);
+    let column = position.wrapping_sub(line_start);
+    if !label_block_columns(content).contains(&column) {
+        return (None, None, None);
+    }
+    match index
+        .starting_at(line)
+        .into_iter()
+        .find(|e| e.class == "WhereRule")
+    {
+        Some(rule) => (Some(rule.ptr.clone()), Some("inline"), Some(REGION_OPENER)),
+        None => (None, None, None),
+    }
+}
+
 /// `mid_keyword_inline_target`: `ELSE -- why` / `OTHERWISE : -- why`.
 #[allow(clippy::type_complexity)]
 fn mid_keyword_inline_target(
@@ -3550,6 +3631,10 @@ fn find_body_comment_target(
     line: usize,
     position: usize,
 ) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
+    let label_block = where_label_block_target(index, lines, line, position);
+    if label_block.0.is_some() {
+        return label_block;
+    }
     if inline_remark(lines, line) {
         let (target, placement, region) = inline_target(index, lines, line, position);
         if target.is_some() {
