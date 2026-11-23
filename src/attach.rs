@@ -3114,6 +3114,249 @@ fn mid_keyword_inline_target(
     }
 }
 
+/// The nested declarations of a callable: its own collections, before
+/// LOCAL and the statements.
+const HEAD_COLLECTIONS: [&str; 6] = [
+    "types",
+    "entities",
+    "subtype_constraints",
+    "functions",
+    "procedures",
+    "constants",
+];
+
+static LOCAL_DECLARED_NAMES: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"^\s*([A-Za-z_][A-Za-z0-9_]*(?:\s*,\s*[A-Za-z_][A-Za-z0-9_]*)*)\s*:(?:[^=]|$)")
+        .unwrap()
+});
+
+/// Whether a source line holds nothing but remarks: `--` comments and
+/// one-line `(* *)` blocks, which nest. A block left open at the end of
+/// the line, or code, makes it false.
+fn only_remark(content: &str) -> bool {
+    let bytes = content.as_bytes();
+    let mut i = 0;
+    let mut depth = 0;
+    while i < bytes.len() {
+        let pair = bytes.get(i..i + 2).unwrap_or(&[]);
+        if depth == 0 && pair == b"--" {
+            return true;
+        } else if pair == b"(*" {
+            depth += 1;
+            i += 2;
+        } else if depth > 0 && pair == b"*)" {
+            depth -= 1;
+            i += 2;
+        } else if depth == 0 && !bytes[i].is_ascii_whitespace() {
+            return false;
+        } else {
+            i += 1;
+        }
+    }
+    depth == 0
+}
+
+/// The first line after `line` that holds code, as (line number, text):
+/// blank lines and lines of remarks only are skipped.
+fn next_code_line<'a>(lines: &[&'a str], line: usize) -> Option<(usize, &'a str)> {
+    (line + 1..=lines.len()).find_map(|probe| {
+        let content = lines[probe - 1].trim();
+        (!content.is_empty() && !only_remark(content)).then_some((probe, content))
+    })
+}
+
+/// Whether the end of `text` stands inside the LOCAL block of the callable
+/// that `text` starts, and the last code token before it. Remarks and
+/// string literals are skipped; LOCAL opens the block and END_LOCAL closes
+/// it.
+fn local_block_state(text: &str) -> (bool, String) {
+    let bytes = text.as_bytes();
+    let mut inside = false;
+    let mut last = String::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        let pair = bytes.get(i..i + 2).unwrap_or(&[]);
+        let c = bytes[i];
+        if pair == b"--" {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                i += 1;
+            }
+        } else if pair == b"(*" {
+            let mut depth = 0;
+            while i < bytes.len() {
+                let pair = bytes.get(i..i + 2).unwrap_or(&[]);
+                if pair == b"(*" {
+                    depth += 1;
+                    i += 2;
+                } else if pair == b"*)" {
+                    depth -= 1;
+                    i += 2;
+                } else {
+                    i += 1;
+                }
+                if depth == 0 {
+                    break;
+                }
+            }
+        } else if c == b'\'' || c == b'"' {
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == c {
+                    if c == b'\'' && bytes.get(i + 1) == Some(&b'\'') {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+                i += 1;
+            }
+            i += 1;
+            last = "'".to_string();
+        } else if c.is_ascii_alphabetic() || c == b'_' {
+            let mut j = i + 1;
+            while j < bytes.len() && (bytes[j].is_ascii_alphanumeric() || bytes[j] == b'_') {
+                j += 1;
+            }
+            last = text[i..j].to_string();
+            if last.eq_ignore_ascii_case("LOCAL") {
+                inside = true;
+            } else if last.eq_ignore_ascii_case("END_LOCAL") {
+                inside = false;
+            }
+            i = j;
+        } else if c.is_ascii_whitespace() {
+            i += 1;
+        } else {
+            last = (c as char).to_string();
+            i += 1;
+        }
+    }
+    (inside, last)
+}
+
+/// A comment on its own line in the declaration part of a FUNCTION,
+/// PROCEDURE or RULE. Before a nested declaration it leads that
+/// declaration; before LOCAL or END_LOCAL it closes the part above
+/// (trailing, region declarations or variables); before a LOCAL variable
+/// it leads the variable. The variables carry no source spans, so the next
+/// code line names the one (as in `local_variable_target`). Nothing else
+/// follows the declaration part but the statements and WHERE rules, so a
+/// body that starts above the line found means the comment is not in the
+/// declaration part. Only `--` comments and one-line `(* *)` comments take
+/// part: a comment of several lines is left to the lookups that follow.
+#[allow(clippy::type_complexity)]
+fn head_declaration_target(
+    root: &Value,
+    index: &WireIndex,
+    lines: &[&str],
+    line: usize,
+) -> (Option<String>, Option<&'static str>, Option<&'static str>) {
+    let miss = (None, None, None);
+    if !only_remark(lines.get(line - 1).copied().unwrap_or("")) {
+        return miss;
+    }
+    let callables: Vec<&IndexEntry> = index
+        .spanning(line)
+        .into_iter()
+        .filter(|e| e.line < line && matches!(e.class.as_str(), "Function" | "Procedure" | "Rule"))
+        .collect();
+    let Some(callable) = innermost(callables) else {
+        return miss;
+    };
+    let owned = |collections: &[&str]| -> Vec<&IndexEntry> {
+        index
+            .entries
+            .iter()
+            .filter(|e| {
+                e.owner_ptr.as_deref() == Some(callable.ptr.as_str())
+                    && e.line > line
+                    && e.collection.is_some_and(|c| collections.contains(&c))
+            })
+            .collect()
+    };
+    let body = owned(&[
+        "statements",
+        "else_statements",
+        "action_statements",
+        "otherwise_statements",
+        "where_rules",
+    ])
+    .iter()
+    .map(|e| e.line)
+    .min();
+    let in_head = |l: usize| body.is_none_or(|b| l < b);
+
+    if let Some(nested) = owned(&HEAD_COLLECTIONS)
+        .into_iter()
+        .min_by_key(|e| e.offset)
+    {
+        return if in_head(nested.line) {
+            (Some(nested.ptr.clone()), Some("leading"), None)
+        } else {
+            miss
+        };
+    }
+
+    let Some(variables) = root
+        .pointer(&callable.ptr)
+        .and_then(|n| n.get("variables"))
+        .and_then(Value::as_array)
+        .filter(|v| !v.is_empty())
+    else {
+        return miss;
+    };
+    let Some((code_line, code)) = next_code_line(lines, line) else {
+        return miss;
+    };
+    if !in_head(code_line) {
+        return miss;
+    }
+    let keyword = |word: &str| {
+        code.get(..word.len())
+            .is_some_and(|w| w.eq_ignore_ascii_case(word))
+            && !code[word.len()..].starts_with(|c: char| c.is_alphanumeric() || c == '_')
+    };
+    if keyword("LOCAL") {
+        return (
+            Some(callable.ptr.clone()),
+            Some("trailing"),
+            Some("declarations"),
+        );
+    }
+    if keyword("END_LOCAL") {
+        return (
+            Some(callable.ptr.clone()),
+            Some("trailing"),
+            Some("variables"),
+        );
+    }
+
+    // A variable is led only from inside the LOCAL block of this callable,
+    // after the end of a declaration: a comment between the names of one
+    // declaration, or in a statement body, is not.
+    let text = lines[callable.line - 1..line - 1].join("\n");
+    let (inside, last) = local_block_state(&text);
+    if !(inside && (last == ";" || last.eq_ignore_ascii_case("LOCAL"))) {
+        return miss;
+    }
+    let Some(names) = LOCAL_DECLARED_NAMES.captures(code).and_then(|c| c.get(1)) else {
+        return miss;
+    };
+    let names: Vec<&str> = names.as_str().split(',').map(str::trim).collect();
+    let Some(pos) = variables.iter().position(|v| {
+        v.get("id")
+            .and_then(Value::as_str)
+            .is_some_and(|id| names.iter().any(|n| n.eq_ignore_ascii_case(id)))
+    }) else {
+        return miss;
+    };
+    (
+        Some(format!("{}/variables/{}", callable.ptr, pos)),
+        Some("leading"),
+        None,
+    )
+}
+
 #[allow(clippy::type_complexity)]
 static LOCAL_VAR_NAME: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"([A-Za-z_]\w*)\s*(?::|,)").unwrap());
@@ -3328,6 +3571,14 @@ fn find_body_comment_target(
     if closing.0.is_some() {
         return closing;
     }
+    // An own-line comment in the declaration part of a FUNCTION, PROCEDURE
+    // or RULE leads the declaration written below it. The statement
+    // lookup below would hand it to the first statement.
+    let head = head_declaration_target(root, index, lines, line);
+    if head.0.is_some() {
+        return head;
+    }
+
     let Some((enclosing, region_entries, _region_attr)) = statement_region_for(index, lines, line)
     else {
         return declaration_level_target(index, lines, line);

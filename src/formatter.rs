@@ -434,6 +434,7 @@ impl<'a> Formatter<'a> {
                     .join(", ");
                 let lead = self.node(&ptrs[i]).clone();
                 let t = cls(&lead).rsplit("::").next().unwrap_or("").to_string();
+                let leading = self.format_leading_statement_remarks(&lead);
                 let rendered = match t.as_str() {
                     "Attribute" | "DerivedAttribute" | "InverseAttribute" => {
                         self.format_attribute_ids(&ptrs[i], &lead, Some(&ids))
@@ -442,7 +443,14 @@ impl<'a> Formatter<'a> {
                     "Variable" => self.format_variable_ids(&ptrs[i], &lead, Some(&ids)),
                     _ => self.dispatch(&ptrs[i]),
                 };
-                out.push(rendered);
+                // The combined declaration does not pass through dispatch.
+                out.push(
+                    leading
+                        .into_iter()
+                        .chain(std::iter::once(rendered))
+                        .collect::<Vec<_>>()
+                        .join("\n"),
+                );
                 i = j;
             } else {
                 out.push(self.dispatch(&ptrs[i]));
@@ -879,8 +887,16 @@ impl<'a> Formatter<'a> {
             let inner = self.list_join(ptr, "constants", "\n");
             out.push(self.indent(&format!("CONSTANT\n{}\nEND_CONSTANT;", self.indent(&inner))));
         }
+        // A comment on its own line before LOCAL closes the declarations.
+        for remark in self.format_trailing_region_remarks(node, "declarations") {
+            out.push(self.indent(&remark));
+        }
         if !arr(node, "variables").is_empty() {
-            let inner = self.list_join_grouped(ptr, "variables", "\n", false);
+            let mut inner = self.list_join_grouped(ptr, "variables", "\n", false);
+            for remark in self.format_trailing_region_remarks(node, "variables") {
+                inner.push('\n');
+                inner.push_str(&remark);
+            }
             out.push(self.indent(&format!("LOCAL\n{}\nEND_LOCAL;", self.indent(&inner))));
         }
         if !arr(node, "statements").is_empty() {
@@ -923,8 +939,16 @@ impl<'a> Formatter<'a> {
             let inner = self.list_join(ptr, "constants", "\n");
             out.push(self.indent(&format!("CONSTANT\n{}\nEND_CONSTANT;", self.indent(&inner))));
         }
+        // A comment on its own line before LOCAL closes the declarations.
+        for remark in self.format_trailing_region_remarks(node, "declarations") {
+            out.push(self.indent(&remark));
+        }
         if !arr(node, "variables").is_empty() {
-            let inner = self.list_join_grouped(ptr, "variables", "\n", false);
+            let mut inner = self.list_join_grouped(ptr, "variables", "\n", false);
+            for remark in self.format_trailing_region_remarks(node, "variables") {
+                inner.push('\n');
+                inner.push_str(&remark);
+            }
             out.push(self.indent(&format!("LOCAL\n{}\nEND_LOCAL;", self.indent(&inner))));
         }
         let stmt_count = arr(node, "statements").len();
@@ -2660,14 +2684,18 @@ impl PrettyFormatter {
             .map(|(i, p)| {
                 let name_pad = " ".repeat(name_width - names[i].len());
                 let type_pad = " ".repeat(type_width - types[i].len());
-                format!(
+                // A comment on a line of its own above the constant leads it.
+                let constant = format!(
                     "{}{} : {}{} := {};",
                     names[i],
                     name_pad,
                     types[i],
                     type_pad,
                     f.child(p, "expression")
-                )
+                );
+                let mut lines = f.format_leading_statement_remarks(f.node(p));
+                lines.push(constant);
+                lines.join("\n")
             })
             .collect::<Vec<_>>()
             .join("\n")
@@ -2803,7 +2831,20 @@ impl PrettyFormatter {
             let items = arr(node, field);
             if !items.is_empty() {
                 let rendered: Vec<String> = (0..items.len())
-                    .map(|i| self.pretty_dispatch(f, &format!("{ptr}/{field}/{i}")))
+                    .map(|i| {
+                        let item = format!("{ptr}/{field}/{i}");
+                        // The pretty emitters of an entity, a function and a
+                        // procedure write no leading remark; the others go
+                        // through dispatch, which does.
+                        let mut lines = match field {
+                            "entities" | "functions" | "procedures" => {
+                                f.format_leading_statement_remarks(f.node(&item))
+                            }
+                            _ => Vec::new(),
+                        };
+                        lines.push(self.pretty_dispatch(f, &item));
+                        lines.join("\n")
+                    })
                     .collect();
                 out.push(self.indent(&rendered.join("\n")));
             }
@@ -2823,15 +2864,24 @@ impl PrettyFormatter {
                 ),
             );
         }
+        // A comment on its own line before LOCAL closes the declarations.
+        for remark in f.format_trailing_region_remarks(node, "declarations") {
+            out.push(self.indent(&remark));
+        }
         let variables = arr(node, "variables");
         if !variables.is_empty() {
             let count = variables.len();
             let ptrs: Vec<String> = (0..count).map(|i| format!("{ptr}/variables/{i}")).collect();
+            let mut inner = f.join_grouped(&ptrs, "\n", false);
+            for remark in f.format_trailing_region_remarks(node, "variables") {
+                inner.push('\n');
+                inner.push_str(&remark);
+            }
             out.push(
                 self.indent(
                     &[
                         "LOCAL".to_string(),
-                        self.indent(&f.join_grouped(&ptrs, "\n", false)),
+                        self.indent(&inner),
                         "END_LOCAL;".to_string(),
                     ]
                     .join("\n"),
